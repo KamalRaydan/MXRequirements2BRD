@@ -60,6 +60,18 @@ def get_run(run_id: str, db: Session = Depends(get_db)):
     return run
 
 
+@router.post("/pipeline/{run_id}/cancel", status_code=202)
+def cancel_run(run_id: str, db: Session = Depends(get_db)):
+    """Sets the cancel flag; the pipeline checks it between stages (spec §10.5)."""
+    run = db.get(PipelineRun, run_id)
+    if not run:
+        raise api_error(404, "NOT_FOUND", "Run not found")
+    if run.status != "RUNNING":
+        raise api_error(409, "NOT_RUNNING", f"Run already finished ({run.status})")
+    bus.request_cancel(run_id)
+    return {"run_id": run_id, "status": "CANCELLING"}
+
+
 @router.get("/pipeline/{run_id}/stream")
 async def stream_run(run_id: str, db: Session = Depends(get_db)):
     run = db.get(PipelineRun, run_id)
@@ -72,6 +84,9 @@ async def stream_run(run_id: str, db: Session = Depends(get_db)):
         if run.status == "DONE":
             bus.publish(run_id, "done", {"stage": "done", "output_path": run.output_path,
                                          "percent": 100, "run_id": run_id})
+        elif run.status == "CANCELLED":
+            bus.publish(run_id, "error", {"stage": "cancelled", "message": "Generation cancelled",
+                                          "percent": 0, "run_id": run_id})
         else:
             bus.publish(run_id, "error", {"stage": "failed",
                                           "message": run.error_message or "Run failed",

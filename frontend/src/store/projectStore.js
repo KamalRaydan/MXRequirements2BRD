@@ -1,11 +1,12 @@
 import { create } from 'zustand'
-import { apiDelete, apiGet, apiPost, uploadSource } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost, uploadBranding, uploadSource } from '../api'
 
 export const useProjectStore = create((set, get) => ({
   projects: [],
   current: null, // full project incl. source_count + latest_run
   sources: [],
   runs: [],
+  branding: { branded_docx_path: null, headings: [] },
 
   async loadProjects() {
     set({ projects: await apiGet('/projects') })
@@ -23,12 +24,13 @@ export const useProjectStore = create((set, get) => ({
   },
 
   async loadProject(id) {
-    const [current, sources, runs] = await Promise.all([
+    const [current, sources, runs, branding] = await Promise.all([
       apiGet(`/projects/${id}`),
       apiGet(`/projects/${id}/sources`),
       apiGet(`/projects/${id}/runs`),
+      apiGet(`/projects/${id}/branding`),
     ])
-    set({ current, sources, runs })
+    set({ current, sources, runs, branding })
   },
 
   async refreshSources(id) {
@@ -45,5 +47,23 @@ export const useProjectStore = create((set, get) => ({
   async deleteSource(projectId, sourceId) {
     await apiDelete(`/projects/${projectId}/sources/${sourceId}`)
     await get().refreshSources(projectId)
+  },
+
+  // Pass null to clear the override and fall back to the source timestamp
+  async setSourceDate(projectId, sourceId, isoDateOrNull) {
+    await apiPatch(`/projects/${projectId}/sources/${sourceId}`, {
+      user_timestamp_override: isoDateOrNull,
+    })
+    await get().refreshSources(projectId)
+  },
+
+  async setBranding(projectId, file) {
+    const branding = await uploadBranding(projectId, file)
+    set({ branding })
+  },
+
+  async removeBranding(projectId) {
+    await apiDelete(`/projects/${projectId}/branding`)
+    set({ branding: { branded_docx_path: null, headings: [] } })
   },
 }))

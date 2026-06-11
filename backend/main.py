@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,6 +37,16 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """All errors use the {error: {code, message}} envelope (spec §10)."""
     detail = exc.detail if isinstance(exc.detail, dict) else {"code": "ERROR", "message": str(exc.detail)}
     return JSONResponse(status_code=exc.status_code, content={"error": detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Body/query validation failures also use the envelope instead of FastAPI's
+    raw detail list (spec §10)."""
+    first = exc.errors()[0] if exc.errors() else {}
+    field = ".".join(str(part) for part in first.get("loc", []) if part != "body")
+    message = f"{field}: {first.get('msg', 'invalid value')}" if field else "Invalid request"
+    return JSONResponse(status_code=422, content={"error": {"code": "VALIDATION", "message": message}})
 
 
 @app.exception_handler(Exception)

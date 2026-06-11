@@ -2,7 +2,7 @@
 
 This document is everything needed to implement the project without referring back to `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and lays out a milestone plan that produces a **working application within the first two weeks** and grows it — without rework — into the full desktop product.
 
-**Status:** Milestone 1 complete — browser MVP working
+**Status:** Milestone 2 complete — hardened browser MVP (cancel/retry, branded templates, structured errors, test coverage)
 **Platform:** macOS first (Windows later)
 **MVP shape:** Local web app — Python FastAPI backend + React frontend in the browser at `localhost`
 **Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3)
@@ -70,13 +70,13 @@ The previous revision of this spec front-loaded Electron, dual AI providers, and
 | Electron shell + IPC + native dialogs | Per §13 | Milestone 3 |
 | API keys in Electron `safeStorage` (migrated from Keychain) | Per §13.3 | Milestone 3 |
 | Portable per-project `project.db` | Split rows out of `app.db` by `project_id` (schema already keyed for it) | Milestone 3 (with Electron packaging) |
-| Branded DOCX → heading-structure extraction | `StructureExtractor` | Milestone 2 |
+| Branded DOCX → heading-structure extraction | `StructureExtractor` | Milestone 2 ✅ |
 | Audio/video/image processing (Whisper, ffmpeg, vision) | `PENDING → TRANSCRIBING → EXTRACTED` | Milestone 5 |
 | MAS 8.x knowledge + enablement | `mas-8.md` | Milestone 5 |
 | Visual branding clone (fonts/logo/tables) | `BrandingProfile` | Milestone 6 |
 | Ollama local models | `OllamaProvider` | Milestone 7 |
 | Windows build, signing, onboarding polish | electron-builder + PyInstaller | Milestone 8 |
-| Alembic migrations | Introduce once schema churn matters | Milestone 2–3 |
+| Alembic migrations | Introduce once schema churn matters (skipped in M2 — no churn yet, avoids a new dependency) | Milestone 3 |
 
 ---
 
@@ -178,7 +178,7 @@ maximobrd/
 │   │   ├── docx_renderer.py
 │   │   ├── progress_bus.py
 │   │   ├── keystore.py               (macOS Keychain wrapper via keyring)
-│   │   └── structure_extractor.py    (Milestone 2)
+│   │   └── structure_extractor.py    (branded-template heading extraction)
 │   ├── agents/
 │   │   ├── runner.py                 (pipeline orchestrator — BackgroundTask entry point)
 │   │   ├── extractor.py
@@ -207,6 +207,10 @@ maximobrd/
 │   │   ├── test_processors.py
 │   │   ├── test_id_assignment.py
 │   │   ├── test_docx_renderer.py
+│   │   ├── test_llm_client.py
+│   │   ├── test_settings.py
+│   │   ├── test_structure_extractor.py
+│   │   ├── test_branding.py
 │   │   └── test_pipeline_integration.py
 │   └── requirements.txt
 ├── knowledge/versions/
@@ -498,7 +502,7 @@ Header row: bold. All cells: Normal style (no inline fonts).
 
 Base URL: `http://127.0.0.1:8765` (port from `MAXIMOBRD_PORT`, default 8765)
 All errors: `{ "error": { "code": "STRING", "message": "Human readable" } }`
-Never return Python stack traces to the client.
+Never return Python stack traces to the client. Request-validation failures (FastAPI 422) are wrapped in the same envelope with code `VALIDATION`.
 
 ### 10.1 Health
 
@@ -523,7 +527,9 @@ Never return Python stack traces to the client.
 - `GET /projects` → `200` list.
 - `GET /projects/{id}` → `200` full project + source count + latest run.
 - `DELETE /projects/{id}` → `204` (removes DB rows only; never deletes the folder).
-- `PUT /projects/{id}/branding` — **Milestone 2** — multipart branded DOCX → `branding/reference.docx`, updates `branded_docx_path`, returns extracted heading preview.
+- `PUT /projects/{id}/branding` — multipart branded DOCX → `branding/reference.docx`, updates `branded_docx_path`, returns extracted heading preview (422 `INVALID_TEMPLATE` if not a .docx or it has no Heading 1–3).
+- `GET /projects/{id}/branding` → `{ branded_docx_path, headings }` — preview for the stored template (empty when none set).
+- `DELETE /projects/{id}/branding` → `204` — removes the reference file and reverts to the default structure.
 
 ### 10.3 Sources
 
@@ -589,7 +595,7 @@ From Milestone 3 this migrates to the safeStorage + `X-API-Key` header-injection
 
 - `GET /pipeline/{run_id}` → run metadata.
 - `GET /pipeline/{run_id}/stream` — SSE (§11).
-- `POST /pipeline/{run_id}/cancel` — **Milestone 2** — sets cancel flag; pipeline checks between stages.
+- `POST /pipeline/{run_id}/cancel` → `202` `{ "run_id", "status": "CANCELLING" }` — sets the cancel flag on the ProgressBus; the pipeline checks it between stages, then marks the run `CANCELLED` and emits an `error` SSE event with `stage: "cancelled"`. `409 NOT_RUNNING` if the run already finished.
 - `GET /pipeline/{run_id}/download` → DOCX stream with `Content-Disposition: attachment` (browser saves it; native save dialog arrives with Electron).
 - `GET /projects/{id}/runs` → list of past runs.
 
@@ -611,7 +617,12 @@ data: {"stage":"done","output_path":"/path/to/output/uuid.docx","percent":100,"r
 
 event: error
 data: {"stage":"failed","message":"Analysis validation failed","percent":0,"run_id":"..."}
+
+event: error
+data: {"stage":"cancelled","message":"Generation cancelled","percent":0,"run_id":"..."}
 ```
+
+A cancelled run uses the `error` event type with `stage: "cancelled"` so the UI can distinguish a cancel from a failure.
 
 | stage | percent range |
 |-------|---------------|
@@ -633,7 +644,7 @@ Stream closes after `done` or `error`. If the client connects after the run fini
 
 1. Load project row.
 2. Load knowledge: `VERSION_MAP[maximo_version]` → read `.md` file.
-3. Load BRD structure: `brd_default_structure.json` (MVP). From Milestone 2: if `branded_docx_path` set → `StructureExtractor.extract_headings()` instead.
+3. Load BRD structure: if `branded_docx_path` is set and the file exists → `StructureExtractor.extract_headings()`; else `brd_default_structure.json`. Branded headings matching known BRD sections get canonical ids (so requirement tables and the appendix land in the right place); unrecognised headings get slug ids and render as narrative sections.
 4. Load sources where `processing_status == EXTRACTED`, ordered by effective timestamp (`user_timestamp_override ?? source_timestamp`).
 5. Read API key from Keychain (M3+: from `X-API-Key` header).
 
@@ -836,7 +847,7 @@ No HTML `<form>` tags (React `onClick`/`onChange` only). No localStorage/session
 2. **Sources** — drag-drop zone + browse button. Columns: filename, size, effective date, status badge, actions (delete, edit date). Badges: Extracting, Ready (EXTRACTED), Pending, Error (tooltip with message).
 3. **Generate** button — disabled unless ≥1 EXTRACTED source AND provider configured.
 4. **Run history** — past runs with status, date, download link.
-5. **Branded template** upload + heading preview — added in Milestone 2.
+5. **Branded template** — upload/replace/remove a reference DOCX with an indented heading preview (Milestone 2).
 
 ### 14.4 Generate page
 
@@ -845,7 +856,7 @@ No HTML `<form>` tags (React `onClick`/`onChange` only). No localStorage/session
 - Live message log (last 5 messages).
 - On `done`: "Download BRD" (browser download; native save dialog in Milestone 3).
 - On `error`: message + "Return to project" + "Retry".
-- Cancel button — Milestone 2.
+- Cancel button while running ("Cancelling…" until the pipeline reaches a stage boundary); cancelled state shows Retry + "Return to project" (Milestone 2).
 
 ### 14.5 Settings
 
@@ -934,14 +945,19 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 | `processors/docx.py` | paragraphs + tables | ✅ `test_processors.py` |
 | ID assignment | `BRD-WO-001` sequencing | ✅ `test_id_assignment.py` |
 | `docx_renderer.py` | tables exist, DRAFT header present, named styles only | ✅ `test_docx_renderer.py` |
-| `llm_client.py` | retry logic (mocked) | Milestone 2 |
-| `structure_extractor.py` | heading hierarchy order | Milestone 2 |
+| `llm_client.py` | retry logic (mocked) | ✅ `test_llm_client.py` |
+| `structure_extractor.py` | heading hierarchy order, canonical id mapping | ✅ `test_structure_extractor.py` |
 
 ### 17.2 Integration tests
 
 - Create project → upload TXT → wait EXTRACTED → generate (mock LLM) → DOCX file exists. ✅ `test_pipeline_integration.py`
 - Generate blocked when no EXTRACTED sources. ✅ `test_pipeline_integration.py`
-- Malformed PDF → ERROR status + message. (Milestone 2)
+- Malformed PDF → ERROR status + message. ✅ `test_pipeline_integration.py`
+- Cancel flag → run CANCELLED + `stage: "cancelled"` SSE event; cancel after finish → 409. ✅ `test_pipeline_integration.py`
+- SSE replay for late connections (in-memory replay + post-restart synthesis). ✅ `test_pipeline_integration.py`
+- Generate with a branded template → DONE. ✅ `test_pipeline_integration.py`
+- Validation errors use the `{error: {code, message}}` envelope. ✅ `test_pipeline_integration.py`
+- Branding upload/preview/removal routes; non-DOCX and heading-less templates rejected. ✅ `test_branding.py`
 
 ### 17.3 Manual E2E (Milestone 1 exit criteria)
 
@@ -980,16 +996,16 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 
 **Also delivered:** `agents/runner.py` (pipeline orchestrator), `services/keystore.py` (Keychain wrapper), `routes/__init__.py` (error envelope helper), `frontend/src/api.js` (single API layer), `frontend/src/components/StatusBadge.jsx`, and four pytest test files (processors, ID assignment, DOCX renderer, full pipeline integration with mocked LLM).
 
-### Milestone 2 — Hardening + spec completion (1–2 weeks)
+### Milestone 2 — Hardening + spec completion ✅ Complete
 
-- [ ] Cancel pipeline (flag checked between stages) + Retry flow
-- [ ] Branded DOCX upload + `StructureExtractor` heading preview + use in pre-flight
-- [ ] Timestamp override UI; filename collision and corrupt-file handling verified
-- [ ] Structured API errors everywhere; React error boundaries
-- [ ] Unit + integration tests per §17.1–17.2; SSE replay for late connections
-- [ ] Optional: introduce Alembic before the schema is split in M3
+- [x] Cancel pipeline (ProgressBus flag checked between stages, `CANCELLED` status, `POST /pipeline/{run_id}/cancel`) + Retry flow for failed and cancelled runs
+- [x] Branded DOCX upload (`PUT/GET/DELETE /projects/{id}/branding`) + `StructureExtractor` heading preview + use in pre-flight
+- [x] Timestamp override UI (inline date editor per source row, with clear-override); filename collision and corrupt-file handling verified by tests
+- [x] Structured API errors everywhere (validation 422s wrapped in the envelope); React error boundary around all routes
+- [x] Unit + integration tests per §17.1–17.2; SSE replay for late connections covered by tests
+- [ ] ~~Optional: introduce Alembic~~ — skipped: no schema churn yet and it would add a dependency; revisit at the Milestone 3 DB split
 
-**Done when:** the app survives bad inputs gracefully and the test suite is green.
+**Done when:** the app survives bad inputs gracefully and the test suite is green. *(Met — 35 backend tests passing.)*
 
 ### Milestone 3 — Desktop shell (1–2 weeks)
 
@@ -1069,8 +1085,8 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 
 | Question | Answer |
 |----------|--------|
-| Is anything working now? | Yes — Milestone 1 complete: real BRD from real documents, downloadable from the browser |
-| What's next? | Milestone 2: cancel mid-run, branded template upload, structured errors, test coverage hardening |
+| Is anything working now? | Yes — Milestones 0–2 complete: real BRD from real documents, with cancel mid-run, branded templates, timestamp overrides, and structured error handling |
+| What's next? | Milestone 3: Electron shell, safeStorage keys, native dialogs, per-project DB split, DMG packaging |
 | Does the MVP lock us in? | No — backend, API, schema, and UI carry into Electron unchanged; key storage and dialogs are the only swaps |
 | What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18 — nothing from the blueprint was dropped |
 | What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored before real client use) |

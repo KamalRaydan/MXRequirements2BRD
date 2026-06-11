@@ -50,6 +50,20 @@ export function uploadSource(projectId, file) {
   }).then(handle)
 }
 
+// Branded reference DOCX whose headings replace the default BRD structure
+export function uploadBranding(projectId, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return fetch(`${BASE}/projects/${projectId}/branding`, {
+    method: 'PUT',
+    body: form,
+  }).then(handle)
+}
+
+export function cancelRun(runId) {
+  return apiPost(`/pipeline/${runId}/cancel`)
+}
+
 // SSE pipeline progress. Returns the EventSource so callers can close it.
 export function streamRun(runId, { onProgress, onDone, onError }) {
   const source = new EventSource(`${BASE}/pipeline/${runId}/stream`)

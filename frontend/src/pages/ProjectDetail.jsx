@@ -11,15 +11,29 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+// ISO timestamp -> "YYYY-MM-DDTHH:mm" in local time, for <input type="datetime-local">
+function toLocalInputValue(iso) {
+  const d = new Date(iso)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export default function ProjectDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { current, sources, runs, loadProject, refreshSources, uploadFiles, deleteSource } = useProjectStore()
+  const {
+    current, sources, runs, branding, loadProject, refreshSources, uploadFiles,
+    deleteSource, setSourceDate, setBranding, removeBranding,
+  } = useProjectStore()
   const { configured, loaded, load } = useSettingsStore()
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState(null)
+  const [editingSourceId, setEditingSourceId] = useState(null)
+  const [dateValue, setDateValue] = useState('')
+  const [brandingError, setBrandingError] = useState(null)
   const fileInput = useRef(null)
+  const brandingInput = useRef(null)
 
   useEffect(() => {
     loadProject(id)
@@ -45,6 +59,23 @@ export default function ProjectDetail() {
     } finally {
       setUploading(false)
       if (fileInput.current) fileInput.current.value = ''
+    }
+  }
+
+  async function saveSourceDate(sourceId) {
+    await setSourceDate(id, sourceId, dateValue ? new Date(dateValue).toISOString() : null)
+    setEditingSourceId(null)
+  }
+
+  async function handleBrandingFile(file) {
+    if (!file) return
+    setBrandingError(null)
+    try {
+      await setBranding(id, file)
+    } catch (e) {
+      setBrandingError(e.message)
+    } finally {
+      if (brandingInput.current) brandingInput.current.value = ''
     }
   }
 
@@ -116,12 +147,51 @@ export default function ProjectDetail() {
                     <td className="px-4 py-2 font-medium">{s.filename}</td>
                     <td className="px-4 py-2 text-slate-500">{formatBytes(s.file_size_bytes)}</td>
                     <td className="px-4 py-2 text-slate-500">
-                      {new Date(s.user_timestamp_override || s.source_timestamp).toLocaleString()}
+                      {editingSourceId === s.id ? (
+                        <span className="flex items-center gap-2">
+                          <input
+                            type="datetime-local"
+                            value={dateValue}
+                            onChange={(e) => setDateValue(e.target.value)}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs"
+                          />
+                          <button onClick={() => saveSourceDate(s.id)} className="text-xs font-medium text-blue-600 hover:underline">
+                            Save
+                          </button>
+                          {s.user_timestamp_override && (
+                            <button
+                              onClick={() => { setDateValue(''); setSourceDate(id, s.id, null).then(() => setEditingSourceId(null)) }}
+                              className="text-xs text-slate-400 hover:text-slate-600"
+                            >
+                              Clear override
+                            </button>
+                          )}
+                          <button onClick={() => setEditingSourceId(null)} className="text-xs text-slate-400 hover:text-slate-600">
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <>
+                          {new Date(s.user_timestamp_override || s.source_timestamp).toLocaleString()}
+                          {s.user_timestamp_override && (
+                            <span className="ml-1 text-xs text-slate-400">(edited)</span>
+                          )}
+                        </>
+                      )}
                     </td>
                     <td className="px-4 py-2">
                       <StatusBadge status={s.processing_status} title={s.error_message} />
                     </td>
                     <td className="px-4 py-2 text-right">
+                      <button
+                        onClick={() => {
+                          setEditingSourceId(s.id)
+                          setDateValue(toLocalInputValue(s.user_timestamp_override || s.source_timestamp))
+                        }}
+                        className="mr-3 text-xs text-slate-400 hover:text-slate-900"
+                      >
+                        Edit date
+                      </button>
                       <button
                         onClick={() => deleteSource(id, s.id)}
                         className="text-xs text-slate-400 hover:text-red-600"
@@ -134,6 +204,53 @@ export default function ProjectDetail() {
               </tbody>
             </table>
           </div>
+        )}
+      </section>
+
+      {/* Branded template (Milestone 2) */}
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Branded Template</h2>
+            <p className="text-sm text-slate-500">
+              {branding.branded_docx_path
+                ? 'The BRD will follow this document’s heading structure.'
+                : 'Optional: upload a client DOCX — its headings replace the default BRD structure.'}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => brandingInput.current?.click()}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            >
+              {branding.branded_docx_path ? 'Replace' : 'Upload DOCX'}
+            </button>
+            {branding.branded_docx_path && (
+              <button
+                onClick={() => removeBranding(id)}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          <input
+            ref={brandingInput}
+            type="file"
+            accept=".docx"
+            className="hidden"
+            onChange={(e) => handleBrandingFile(e.target.files?.[0])}
+          />
+        </div>
+        {brandingError && <p className="mt-2 text-sm text-red-600">{brandingError}</p>}
+        {branding.headings.length > 0 && (
+          <ul className="mt-4 rounded-md border border-slate-100 bg-slate-50 p-3 text-sm text-slate-700">
+            {branding.headings.map((h, i) => (
+              <li key={i} style={{ paddingLeft: `${(h.level - 1) * 16}px` }}>
+                {h.title}
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 

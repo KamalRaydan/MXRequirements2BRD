@@ -11,12 +11,23 @@ class ProgressBus:
     def __init__(self) -> None:
         self._events: dict[str, list[dict]] = {}
         self._finished: set[str] = set()
+        self._cancel_requested: set[str] = set()
         self._lock = threading.Lock()
 
     def start_run(self, run_id: str) -> None:
         with self._lock:
             self._events[run_id] = []
             self._finished.discard(run_id)
+            self._cancel_requested.discard(run_id)
+
+    def request_cancel(self, run_id: str) -> None:
+        """Set by the cancel route; the pipeline checks between stages (spec §10.5)."""
+        with self._lock:
+            self._cancel_requested.add(run_id)
+
+    def is_cancel_requested(self, run_id: str) -> bool:
+        with self._lock:
+            return run_id in self._cancel_requested
 
     def publish(self, run_id: str, event_type: str, data: dict) -> None:
         """event_type: progress | done | error"""

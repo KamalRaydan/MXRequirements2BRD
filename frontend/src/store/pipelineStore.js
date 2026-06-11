@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import { apiPost, streamRun } from '../api'
+import { apiPost, cancelRun, streamRun } from '../api'
 
 const initial = {
   runId: null,
-  status: 'idle', // idle | running | done | failed
+  status: 'idle', // idle | running | cancelling | done | failed | cancelled
   percent: 0,
   stage: null,
   messages: [], // last few progress messages
@@ -37,8 +37,20 @@ export const usePipelineStore = create((set, get) => ({
           messages: [...state.messages, data.message].slice(-5),
         })),
       onDone: (data) => set({ status: 'done', percent: 100, outputPath: data.output_path }),
-      onError: (data) => set({ status: 'failed', errorMessage: data.message }),
+      onError: (data) =>
+        data.stage === 'cancelled'
+          ? set({ status: 'cancelled' })
+          : set({ status: 'failed', errorMessage: data.message }),
     })
     set({ runId, status: 'running', eventSource: source })
+  },
+
+  async cancel() {
+    const { runId } = get()
+    if (!runId) return
+    set({ status: 'cancelling' })
+    // The stream's cancelled event flips status to 'cancelled' when the
+    // pipeline actually stops (it only checks the flag between stages)
+    await cancelRun(runId).catch(() => {})
   },
 }))

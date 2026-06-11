@@ -14,7 +14,7 @@ const STAGE_ORDER = ['extraction', 'analysis', 'generation', 'rendering', 'done'
 
 export default function Generate() {
   const { id } = useParams()
-  const { runId, status, percent, stage, messages, errorMessage, start, reset } = usePipelineStore()
+  const { runId, status, percent, stage, messages, errorMessage, start, reset, cancel } = usePipelineStore()
 
   useEffect(() => {
     if (status === 'idle') {
@@ -67,9 +67,20 @@ export default function Generate() {
       </ol>
 
       {/* Live message log (last 5) */}
-      {status === 'running' && (
-        <div className="rounded-lg border border-slate-200 bg-white p-4 font-mono text-xs text-slate-600">
-          {messages.length === 0 ? 'Starting pipeline…' : messages.map((m, i) => <div key={i}>{m}</div>)}
+      {(status === 'running' || status === 'cancelling') && (
+        <div>
+          <div className="rounded-lg border border-slate-200 bg-white p-4 font-mono text-xs text-slate-600">
+            {messages.length === 0 ? 'Starting pipeline…' : messages.map((m, i) => <div key={i}>{m}</div>)}
+          </div>
+          <div className="mt-4 text-center">
+            <button
+              onClick={cancel}
+              disabled={status === 'cancelling'}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-40"
+            >
+              {status === 'cancelling' ? 'Cancelling…' : 'Cancel'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -84,6 +95,27 @@ export default function Generate() {
           </a>
           <div className="mt-3">
             <Link to={`/projects/${id}`} onClick={reset} className="text-sm text-slate-500 hover:underline">
+              Return to project
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {status === 'cancelled' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+          <p className="mb-4 text-sm text-amber-800">Generation cancelled.</p>
+          <div className="flex justify-center gap-3">
+            <button
+              onClick={() => { reset(); start(id).catch((e) => usePipelineStore.setState({ status: 'failed', errorMessage: e.message })) }}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Retry
+            </button>
+            <Link
+              to={`/projects/${id}`}
+              onClick={reset}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            >
               Return to project
             </Link>
           </div>

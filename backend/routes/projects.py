@@ -1,8 +1,9 @@
-"""Project CRUD (spec §10.2)."""
+"""Project CRUD + branded template upload (spec §10.2)."""
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+import aiofiles
+from fastapi import APIRouter, Depends, UploadFile
 from sqlalchemy.orm import Session
 
 import config
@@ -10,6 +11,7 @@ from db.database import get_db
 from db.models import PipelineRun, Project, Source
 from models.project import ProjectCreate, ProjectOut, RunOut
 from routes import api_error
+from services import structure_extractor
 
 router = APIRouter()
 
@@ -82,6 +84,63 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.query(PipelineRun).filter(PipelineRun.project_id == project_id).delete()
     db.delete(project)
     db.commit()
+
+
+@router.put("/projects/{project_id}/branding")
+async def upload_branding(project_id: str, file: UploadFile, db: Session = Depends(get_db)):
+    """Branded reference DOCX whose headings replace the default BRD structure
+    in the pipeline (spec §10.2, Milestone 2)."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise api_error(404, "NOT_FOUND", "Project not found")
+    if not file.filename.lower().endswith(".docx"):
+        raise api_error(422, "INVALID_TEMPLATE", "The branded template must be a .docx file")
+
+    branding_dir = Path(project.folder_path) / "branding"
+    branding_dir.mkdir(parents=True, exist_ok=True)
+    reference = branding_dir / "reference.docx"
+
+    async with aiofiles.open(reference, "wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            await out.write(chunk)
+
+    try:
+        headings = structure_extractor.extract_headings(str(reference))
+    except Exception as e:
+        reference.unlink(missing_ok=True)
+        if project.branded_docx_path == str(reference):
+            project.branded_docx_path = None
+            db.commit()
+        raise api_error(422, "INVALID_TEMPLATE",
+                        f"Could not read headings from this document: {e}")
+
+    project.branded_docx_path = str(reference)
+    db.commit()
+    return {"branded_docx_path": project.branded_docx_path, "headings": headings}
+
+
+@router.get("/projects/{project_id}/branding")
+def get_branding(project_id: str, db: Session = Depends(get_db)):
+    """Heading preview for the currently stored branded template (if any)."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise api_error(404, "NOT_FOUND", "Project not found")
+    if not project.branded_docx_path or not Path(project.branded_docx_path).exists():
+        return {"branded_docx_path": None, "headings": []}
+    headings = structure_extractor.extract_headings(project.branded_docx_path)
+    return {"branded_docx_path": project.branded_docx_path, "headings": headings}
+
+
+@router.delete("/projects/{project_id}/branding", status_code=204)
+def delete_branding(project_id: str, db: Session = Depends(get_db)):
+    """Revert to the default BRD structure (removes the stored reference file)."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise api_error(404, "NOT_FOUND", "Project not found")
+    if project.branded_docx_path:
+        Path(project.branded_docx_path).unlink(missing_ok=True)
+        project.branded_docx_path = None
+        db.commit()
 
 
 @router.get("/projects/{project_id}/runs", response_model=list[RunOut])
