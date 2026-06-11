@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { apiDelete, apiGet, apiPatch, apiPost, uploadBranding, uploadSource } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost, refreshSourceDates, uploadBranding, uploadSource } from '../api'
 
 export const useProjectStore = create((set, get) => ({
   projects: [],
@@ -55,6 +55,12 @@ export const useProjectStore = create((set, get) => ({
       user_timestamp_override: isoDateOrNull,
     })
     await get().refreshSources(projectId)
+  },
+
+  // Re-reads embedded document dates for sources uploaded before date
+  // extraction existed; the route returns the refreshed list
+  async refreshDates(projectId) {
+    set({ sources: await refreshSourceDates(projectId) })
   },
 
   async setBranding(projectId, file) {

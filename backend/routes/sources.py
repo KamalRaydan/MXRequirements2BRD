@@ -92,7 +92,9 @@ async def upload_source(
     else:
         status, error = "PENDING", None  # audio/video/image — Milestone 5
 
-    timestamp = (
+    # Date precedence: the file's own embedded metadata (survives email/download,
+    # unlike filesystem mtime) > browser-reported modified time > upload time.
+    timestamp = processors.embedded_date(filetype, str(filepath)) or (
         datetime.fromisoformat(source_timestamp.replace("Z", "+00:00"))
         if source_timestamp else datetime.now(timezone.utc)
     )
@@ -119,6 +121,31 @@ async def upload_source(
         background_tasks.add_task(_extract_in_background, source.id)
 
     return source
+
+
+@router.post("/projects/{project_id}/sources/refresh-dates", response_model=list[SourceOut])
+def refresh_source_dates(project_id: str, db: Session = Depends(get_db)):
+    """Re-read embedded metadata dates for every source already on disk.
+
+    Backfill for files uploaded before metadata extraction existed. Manual
+    overrides are left alone — effective_timestamp still prefers them.
+    """
+    project = db.get(Project, project_id)
+    if not project:
+        raise api_error(404, "NOT_FOUND", "Project not found")
+
+    sources = (
+        db.query(Source)
+        .filter(Source.project_id == project_id)
+        .order_by(Source.created_at.asc())
+        .all()
+    )
+    for source in sources:
+        found = processors.embedded_date(source.filetype, source.filepath)
+        if found:
+            source.source_timestamp = found
+    db.commit()
+    return sources
 
 
 @router.get("/projects/{project_id}/sources", response_model=list[SourceOut])

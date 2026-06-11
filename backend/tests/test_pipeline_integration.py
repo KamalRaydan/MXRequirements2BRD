@@ -209,6 +209,86 @@ def test_pipeline_uses_branded_structure(client, tmp_path):
     assert run["status"] == "DONE", run.get("error_message")
 
 
+def test_upload_uses_embedded_document_date(client, tmp_path):
+    """A DOCX downloaded from email keeps its real date inside the file — that
+    must win over the browser-reported (reset) modified time."""
+    import io
+    from datetime import datetime, timezone
+
+    import docx as python_docx
+
+    project = client.post("/projects", json={
+        "client_name": "Date Co", "project_name": "Embedded Dates",
+        "project_date": "2026-06-12", "maximo_version": "mas-9",
+        "folder_path": str(tmp_path / "dates"),
+    }).json()
+
+    document = python_docx.Document()
+    document.add_paragraph("Workshop notes")
+    document.core_properties.modified = datetime(2026, 2, 1, 10, 0, tzinfo=timezone.utc)
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    upload = client.post(
+        f"/projects/{project['id']}/sources/upload",
+        files={"file": ("notes.docx", buffer.getvalue())},
+        data={"source_timestamp": "2026-06-12T08:00:00Z"},  # fake "download time"
+    ).json()
+    assert upload["source_timestamp"].startswith("2026-02-01T10:00:00")
+
+    # Plain text has no embedded date — the browser-reported time is the fallback
+    txt = client.post(
+        f"/projects/{project['id']}/sources/upload",
+        files={"file": ("notes.txt", b"plain notes", "text/plain")},
+        data={"source_timestamp": "2026-06-12T08:00:00Z"},
+    ).json()
+    assert txt["source_timestamp"].startswith("2026-06-12T08:00:00")
+
+
+def test_refresh_dates_backfills_existing_sources(client, tmp_path):
+    """refresh-dates re-reads embedded dates from files already on disk and
+    leaves manual overrides untouched."""
+    import io
+    from datetime import datetime, timezone
+
+    import docx as python_docx
+
+    from db.models import Source
+
+    project = client.post("/projects", json={
+        "client_name": "Backfill Co", "project_name": "Refresh Dates",
+        "project_date": "2026-06-12", "maximo_version": "mas-9",
+        "folder_path": str(tmp_path / "backfill"),
+    }).json()
+
+    document = python_docx.Document()
+    document.add_paragraph("Old workshop notes")
+    document.core_properties.modified = datetime(2026, 2, 1, 10, 0, tzinfo=timezone.utc)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    source_id = client.post(
+        f"/projects/{project['id']}/sources/upload",
+        files={"file": ("notes.docx", buffer.getvalue())},
+    ).json()["id"]
+
+    # Simulate a source saved before metadata extraction existed: wrong stored date
+    db = SessionLocal()
+    db.get(Source, source_id).source_timestamp = datetime(2026, 6, 12, tzinfo=timezone.utc)
+    db.commit()
+    db.close()
+
+    refreshed = client.post(f"/projects/{project['id']}/sources/refresh-dates").json()
+    assert refreshed[0]["source_timestamp"].startswith("2026-02-01T10:00:00")
+
+    # A manual override set by the user survives a refresh
+    client.patch(
+        f"/projects/{project['id']}/sources/{source_id}",
+        json={"user_timestamp_override": "2026-03-05T09:00:00Z"},
+    )
+    refreshed = client.post(f"/projects/{project['id']}/sources/refresh-dates").json()
+    assert refreshed[0]["user_timestamp_override"].startswith("2026-03-05T09:00:00")
+
+
 def test_validation_errors_use_the_error_envelope(client):
     response = client.post("/projects", json={"client_name": "Only Client"})
     assert response.status_code == 422

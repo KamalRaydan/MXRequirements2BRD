@@ -23,7 +23,7 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const {
     current, sources, runs, branding, loadProject, refreshSources, uploadFiles,
-    deleteSource, setSourceDate, setBranding, removeBranding,
+    deleteSource, setSourceDate, refreshDates, setBranding, removeBranding,
   } = useProjectStore()
   const { configured, loaded, load } = useSettingsStore()
   const [dragOver, setDragOver] = useState(false)
@@ -32,6 +32,7 @@ export default function ProjectDetail() {
   const [editingSourceId, setEditingSourceId] = useState(null)
   const [dateValue, setDateValue] = useState('')
   const [brandingError, setBrandingError] = useState(null)
+  const [refreshingDates, setRefreshingDates] = useState(false)
   const fileInput = useRef(null)
   const brandingInput = useRef(null)
 
@@ -65,6 +66,15 @@ export default function ProjectDetail() {
   async function saveSourceDate(sourceId) {
     await setSourceDate(id, sourceId, dateValue ? new Date(dateValue).toISOString() : null)
     setEditingSourceId(null)
+  }
+
+  async function handleRefreshDates() {
+    setRefreshingDates(true)
+    try {
+      await refreshDates(id)
+    } finally {
+      setRefreshingDates(false)
+    }
   }
 
   async function handleBrandingFile(file) {
@@ -203,6 +213,22 @@ export default function ProjectDetail() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {sources.length > 0 && (
+          <div className="mt-2 flex items-start justify-between gap-4">
+            <p className="text-xs text-slate-400">
+              Effective dates are read from inside PDF, Word, and Excel files when available.
+              Plain-text and media files have no embedded date — use Edit date to correct them,
+              or upload them in the order they were written.
+            </p>
+            <button
+              onClick={handleRefreshDates}
+              disabled={refreshingDates}
+              className="shrink-0 text-xs font-medium text-blue-600 hover:underline disabled:opacity-40"
+            >
+              {refreshingDates ? 'Refreshing…' : 'Re-read dates from files'}
+            </button>
           </div>
         )}
       </section>

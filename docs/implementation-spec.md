@@ -186,8 +186,9 @@ maximobrd/
 │   │   ├── analyzer.py
 │   │   └── generator.py
 │   ├── processors/
-│   │   ├── __init__.py               (classify/is_extractable/extract_text dispatch)
+│   │   ├── __init__.py               (classify/is_extractable/extract_text/embedded_date dispatch)
 │   │   ├── pdf.py, docx.py, xlsx.py, plaintext.py
+│   │   ├── filedates.py              (embedded created/modified dates from PDF/DOCX/XLSX metadata)
 │   │   └── (audio.py, video.py, image.py — Milestone 5)
 │   ├── models/
 │   │   ├── project.py, pipeline.py, settings.py
@@ -211,6 +212,7 @@ maximobrd/
 │   │   ├── test_settings.py
 │   │   ├── test_structure_extractor.py
 │   │   ├── test_branding.py
+│   │   ├── test_filedates.py
 │   │   └── test_pipeline_integration.py
 │   └── requirements.txt
 ├── knowledge/versions/
@@ -538,7 +540,7 @@ Never return Python stack traces to the client. Request-validation failures (Fas
 - `multipart/form-data`: `file` (binary), optional `source_timestamp` (ISO), optional `user_timestamp_override` (ISO).
 - Filename collision: append `_{n}` before extension (`workshop.pdf` → `workshop_1.pdf`).
 - Max size 500 MB (`MAX_UPLOAD_BYTES`); streamed to disk via `aiofiles`, never fully buffered in RAM.
-- If no timestamp supplied, use the file's modified time when the browser provides it, else upload time.
+- Effective-date precedence: the file's **embedded metadata date** (PDF `modDate`/`creationDate`, DOCX/XLSX core-properties `modified`/`created` — read by `processors/filedates.py`, modified preferred over created) → browser-reported file modified time (`source_timestamp` form field) → upload time. Embedded dates survive email downloads, which reset filesystem mtime; plain text and media have no embedded date and use the fallbacks.
 - Extraction runs as a `BackgroundTask` immediately after upload.
 
 Response `201`:
@@ -557,6 +559,7 @@ Response `201`:
 - `GET /projects/{id}/sources` → `200` array (UI refreshes this after upload and while badges show `EXTRACTING`-at-upload-time only; no pipeline polling).
 - `DELETE /projects/{id}/sources/{source_id}` → `204` (file + sidecar + row).
 - `PATCH /projects/{id}/sources/{source_id}` → `{ "user_timestamp_override": "2026-05-10T14:00:00Z" }`.
+- `POST /projects/{id}/sources/refresh-dates` → `200` refreshed source array — re-reads each file's embedded metadata date from disk and updates `source_timestamp` where one is found (backfill for sources uploaded before date extraction existed; manual overrides are untouched). UI exposes this as "Re-read dates from files" under the sources table.
 
 ### 10.4 Settings
 
@@ -947,6 +950,7 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 | `docx_renderer.py` | tables exist, DRAFT header present, named styles only | ✅ `test_docx_renderer.py` |
 | `llm_client.py` | retry logic (mocked) | ✅ `test_llm_client.py` |
 | `structure_extractor.py` | heading hierarchy order, canonical id mapping | ✅ `test_structure_extractor.py` |
+| `processors/filedates.py` | PDF date-string parsing (offsets/partials), DOCX/XLSX core properties, unreadable file → None | ✅ `test_filedates.py` |
 
 ### 17.2 Integration tests
 
@@ -958,6 +962,8 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 - Generate with a branded template → DONE. ✅ `test_pipeline_integration.py`
 - Validation errors use the `{error: {code, message}}` envelope. ✅ `test_pipeline_integration.py`
 - Branding upload/preview/removal routes; non-DOCX and heading-less templates rejected. ✅ `test_branding.py`
+- Upload uses embedded document date over browser-reported time; plain text falls back. ✅ `test_pipeline_integration.py`
+- `refresh-dates` backfills stored dates from file metadata and preserves manual overrides. ✅ `test_pipeline_integration.py`
 
 ### 17.3 Manual E2E (Milestone 1 exit criteria)
 

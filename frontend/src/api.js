@@ -50,6 +50,11 @@ export function uploadSource(projectId, file) {
   }).then(handle)
 }
 
+// Re-read each source file's embedded created/modified date from disk
+export function refreshSourceDates(projectId) {
+  return apiPost(`/projects/${projectId}/sources/refresh-dates`)
+}
+
 // Branded reference DOCX whose headings replace the default BRD structure
 export function uploadBranding(projectId, file) {
   const form = new FormData()

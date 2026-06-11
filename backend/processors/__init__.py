@@ -27,6 +27,13 @@ def is_extractable(filetype: str) -> bool:
     return filetype in {"pdf", "docx", "plaintext", "spreadsheet"}
 
 
+def embedded_date(filetype: str, filepath: str):
+    """Date stored inside the file's own metadata (UTC), or None."""
+    from processors import filedates
+
+    return filedates.embedded_date(filetype, filepath)
+
+
 def extract_text(filetype: str, filepath: str) -> tuple[str, int | None]:
     """Dispatch to the right processor. Returns (text, page_count or None).
 
