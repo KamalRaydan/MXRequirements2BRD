@@ -1,0 +1,204 @@
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import StatusBadge from '../components/StatusBadge'
+import { downloadUrl } from '../api'
+import { useProjectStore } from '../store/projectStore'
+import { useSettingsStore } from '../store/settingsStore'
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+export default function ProjectDetail() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const { current, sources, runs, loadProject, refreshSources, uploadFiles, deleteSource } = useProjectStore()
+  const { configured, loaded, load } = useSettingsStore()
+  const [dragOver, setDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState(null)
+  const fileInput = useRef(null)
+
+  useEffect(() => {
+    loadProject(id)
+    if (!loaded) load()
+  }, [id])
+
+  // While any source is still extracting, refresh its status every 2s
+  const extracting = sources.some((s) => s.processing_status === 'EXTRACTING')
+  useEffect(() => {
+    if (!extracting) return
+    const timer = setInterval(() => refreshSources(id), 2000)
+    return () => clearInterval(timer)
+  }, [extracting, id])
+
+  async function handleFiles(files) {
+    if (!files?.length) return
+    setUploading(true)
+    setUploadError(null)
+    try {
+      await uploadFiles(id, Array.from(files))
+    } catch (e) {
+      setUploadError(e.message)
+    } finally {
+      setUploading(false)
+      if (fileInput.current) fileInput.current.value = ''
+    }
+  }
+
+  const readyCount = sources.filter((s) => s.processing_status === 'EXTRACTED').length
+  const canGenerate = readyCount > 0 && configured
+
+  if (!current || current.id !== id) {
+    return <p className="text-slate-500">Loading…</p>
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Project metadata header */}
+      <div>
+        <Link to="/" className="text-sm text-slate-500 hover:text-slate-900">← Projects</Link>
+        <h1 className="mt-1 text-xl font-semibold">{current.project_name}</h1>
+        <p className="text-sm text-slate-500">
+          {current.client_name} · {current.project_date} · {current.maximo_version} ·{' '}
+          <span className="font-mono text-xs">{current.folder_path}</span>
+        </p>
+      </div>
+
+      {/* Sources */}
+      <section>
+        <h2 className="mb-3 text-base font-semibold">Requirement Sources</h2>
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files) }}
+          className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+            dragOver ? 'border-blue-400 bg-blue-50' : 'border-slate-300 bg-white'
+          }`}
+        >
+          <p className="text-sm text-slate-600">
+            Drag &amp; drop requirement documents here (PDF, DOCX, TXT, MD, XLSX — media files stored for later processing)
+          </p>
+          <button
+            onClick={() => fileInput.current?.click()}
+            disabled={uploading}
+            className="mt-3 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-40"
+          >
+            {uploading ? 'Uploading…' : 'Browse files'}
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => handleFiles(e.target.files)}
+          />
+        </div>
+        {uploadError && <p className="mt-2 text-sm text-red-600">{uploadError}</p>}
+
+        {sources.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-2">File</th>
+                  <th className="px-4 py-2">Size</th>
+                  <th className="px-4 py-2">Effective date</th>
+                  <th className="px-4 py-2">Status</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sources.map((s) => (
+                  <tr key={s.id} className="border-b border-slate-100 last:border-0">
+                    <td className="px-4 py-2 font-medium">{s.filename}</td>
+                    <td className="px-4 py-2 text-slate-500">{formatBytes(s.file_size_bytes)}</td>
+                    <td className="px-4 py-2 text-slate-500">
+                      {new Date(s.user_timestamp_override || s.source_timestamp).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2">
+                      <StatusBadge status={s.processing_status} title={s.error_message} />
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <button
+                        onClick={() => deleteSource(id, s.id)}
+                        className="text-xs text-slate-400 hover:text-red-600"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Generate */}
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Generate BRD</h2>
+            <p className="text-sm text-slate-500">
+              {readyCount} source{readyCount === 1 ? '' : 's'} ready
+              {!configured && loaded && ' — configure your AI provider in Settings first'}
+            </p>
+          </div>
+          <button
+            onClick={() => navigate(`/projects/${id}/generate`)}
+            disabled={!canGenerate}
+            className="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+          >
+            Generate
+          </button>
+        </div>
+      </section>
+
+      {/* Run history */}
+      {runs.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-base font-semibold">Run History</h2>
+          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-2">Started</th>
+                  <th className="px-4 py-2">Status</th>
+                  <th className="px-4 py-2">Sources used</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={r.id} className="border-b border-slate-100 last:border-0">
+                    <td className="px-4 py-2">{new Date(r.started_at).toLocaleString()}</td>
+                    <td className="px-4 py-2">
+                      <span className={
+                        r.status === 'DONE' ? 'text-green-700' :
+                        r.status === 'FAILED' ? 'text-red-600' : 'text-amber-600'
+                      }>
+                        {r.status}
+                      </span>
+                      {r.error_message && <span className="ml-2 text-xs text-slate-400">{r.error_message}</span>}
+                    </td>
+                    <td className="px-4 py-2 text-slate-500">{r.sources_used_count}</td>
+                    <td className="px-4 py-2 text-right">
+                      {r.status === 'DONE' && (
+                        <a href={downloadUrl(r.id)} className="text-xs font-medium text-blue-600 hover:underline">
+                          Download
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}

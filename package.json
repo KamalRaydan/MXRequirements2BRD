@@ -1,0 +1,12 @@
+{
+  "name": "maximobrd",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:backend": "cd backend && .venv/bin/uvicorn main:app --reload --port 8765 --host 127.0.0.1",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "test:backend": "cd backend && .venv/bin/python -m pytest tests/ -q",
+    "app": "npm run build:frontend && npm run dev:backend"
+  }
+}

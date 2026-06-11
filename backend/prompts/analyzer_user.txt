@@ -1,0 +1,8 @@
+Project: {project_name} for {client_name}
+Maximo version: {maximo_version_label}
+BRD sections to populate: {section_list}
+
+Sources (chronological):
+{sources_json}
+
+Extract all business requirements from these sources.

@@ -1,0 +1,20 @@
+You are compressing source material for a Maximo BRD analysis pass.
+
+Source filename: {filename}
+Source timestamp: {timestamp}
+
+Preserve:
+- All explicit requirements, decisions, and constraints
+- Named Maximo modules and applications referenced
+- Integration points, data entities, and process flows
+- Numbers, dates, SLAs, and priorities
+
+Remove:
+- Boilerplate, repeated headers/footers, page numbers
+- Filler narrative unrelated to requirements
+
+Output a structured excerpt under 8000 characters. Begin with:
+SOURCE: {filename}
+DATE: {timestamp}
+---
+[excerpt]

@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "sections": [
+    { "id": "cover", "title": "Document Control", "level": 1, "required": true },
+    { "id": "executive_summary", "title": "Executive Summary", "level": 1, "required": true },
+    { "id": "background", "title": "Background and Objectives", "level": 1, "required": true },
+    { "id": "scope", "title": "Scope", "level": 1, "required": true },
+    { "id": "scope_in", "title": "In Scope", "level": 2, "required": true },
+    { "id": "scope_out", "title": "Out of Scope", "level": 2, "required": true },
+    { "id": "assumptions", "title": "Assumptions", "level": 1, "required": true },
+    { "id": "requirements", "title": "Business Requirements", "level": 1, "required": true },
+    { "id": "non_functional", "title": "Non-Functional Requirements", "level": 1, "required": false },
+    { "id": "integrations", "title": "Integration Requirements", "level": 1, "required": false },
+    { "id": "risks", "title": "Implementation Risks", "level": 1, "required": true },
+    { "id": "appendix", "title": "Appendix — Source Documents", "level": 1, "required": true }
+  ]
+}

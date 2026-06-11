@@ -1,0 +1,13 @@
+Project metadata: {metadata_json}
+BRD structure: {structure_json}
+Extracted requirements: {requirements_json}
+
+Generate narrative body text for these sections:
+- executive_summary
+- background
+- scope_in
+- scope_out
+- assumptions
+- risks
+
+Each narrative section must reference relevant modules and highlight version-specific considerations.

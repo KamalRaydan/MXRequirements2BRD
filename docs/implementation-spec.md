@@ -2,7 +2,7 @@
 
 This document is everything needed to implement the project without referring back to `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and lays out a milestone plan that produces a **working application within the first two weeks** and grows it — without rework — into the full desktop product.
 
-**Status:** Ready for Milestone 0
+**Status:** Milestone 1 complete — browser MVP working
 **Platform:** macOS first (Windows later)
 **MVP shape:** Local web app — Python FastAPI backend + React frontend in the browser at `localhost`
 **Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3)
@@ -150,7 +150,9 @@ maximobrd/
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx
+│   │   ├── api.js                    (single API layer — fetch/EventSource; swaps to IPC in M3)
 │   │   ├── components/
+│   │   │   └── StatusBadge.jsx
 │   │   ├── pages/
 │   │   │   ├── ProjectList.jsx
 │   │   │   ├── ProjectDetail.jsx
@@ -160,13 +162,14 @@ maximobrd/
 │   │       ├── projectStore.js
 │   │       ├── settingsStore.js
 │   │       └── pipelineStore.js
+│   ├── dist/                         (built output served by FastAPI in single-command mode)
 │   ├── package.json
-│   ├── tailwind.config.js
-│   └── vite.config.js            (dev proxy /api → 127.0.0.1:8765)
+│   └── vite.config.js                (dev proxy /api → 127.0.0.1:8765; uses @tailwindcss/vite)
 ├── backend/
 │   ├── main.py
 │   ├── config.py
 │   ├── routes/
+│   │   ├── __init__.py               (api_error() helper — shared error envelope)
 │   │   ├── projects.py
 │   │   ├── sources.py
 │   │   ├── pipeline.py
@@ -175,19 +178,23 @@ maximobrd/
 │   │   ├── llm_client.py
 │   │   ├── docx_renderer.py
 │   │   ├── progress_bus.py
-│   │   └── structure_extractor.py     (Milestone 2)
+│   │   ├── keystore.py               (macOS Keychain wrapper via keyring)
+│   │   └── structure_extractor.py    (Milestone 2)
 │   ├── agents/
+│   │   ├── runner.py                 (pipeline orchestrator — BackgroundTask entry point)
 │   │   ├── extractor.py
 │   │   ├── summarizer.py
 │   │   ├── analyzer.py
 │   │   └── generator.py
 │   ├── processors/
+│   │   ├── __init__.py               (classify/is_extractable/extract_text dispatch)
 │   │   ├── pdf.py, docx.py, xlsx.py, plaintext.py
 │   │   └── (audio.py, video.py, image.py — Milestone 5)
 │   ├── models/
 │   │   ├── project.py, pipeline.py, settings.py
 │   ├── db/
-│   │   └── database.py
+│   │   ├── database.py
+│   │   └── models.py                 (SQLAlchemy ORM tables)
 │   ├── prompts/
 │   │   ├── summarizer.txt
 │   │   ├── analyzer_system.txt
@@ -197,16 +204,21 @@ maximobrd/
 │   ├── templates/
 │   │   └── brd_default_structure.json
 │   ├── tests/
+│   │   ├── conftest.py               (redirects app data + project dirs to tmp for tests)
+│   │   ├── test_processors.py
+│   │   ├── test_id_assignment.py
+│   │   ├── test_docx_renderer.py
+│   │   └── test_pipeline_integration.py
 │   └── requirements.txt
 ├── knowledge/versions/
 │   ├── maximo-76.md
 │   ├── mas-9.md
-│   └── mas-8.md                  (Milestone 5)
-├── electron/                     (created in Milestone 3)
+│   └── mas-8.md                      (Milestone 5)
+├── electron/                         (created in Milestone 3)
 ├── docs/
 │   ├── blueprint.md
-│   └── implementation-spec.md    (this document)
-└── package.json                  (root convenience scripts)
+│   └── implementation-spec.md        (this document)
+└── package.json                      (root convenience scripts)
 ```
 
 ### Backend dependencies (MVP — confirm before installing)
@@ -436,7 +448,14 @@ class SummarizedSource(BaseModel):
     content: str                   # full text or summary
     was_summarized: bool
 
+class AnalysisDraft(BaseModel):
+    """Schema passed to the LLM for analysis — contains RequirementDraft items (no IDs)."""
+    requirements: list[RequirementDraft]
+    modules_referenced: list[str]
+    analysis_notes: str | None = None
+
 class AnalysisResult(BaseModel):
+    """Post-processing result after assign_ids() converts drafts to full Requirement objects."""
     requirements: list[Requirement]
     modules_referenced: list[str]
     analysis_notes: str | None = None
@@ -445,6 +464,10 @@ class NarrativeSection(BaseModel):
     section_id: str                # matches brd_default_structure id
     title: str
     body: str                      # plain text, paragraphs separated by \n\n
+
+class NarrativeSet(BaseModel):
+    """Schema passed to the LLM for generation — returned before assembly into BRDDocument."""
+    narratives: list[NarrativeSection]
 
 class BRDDocument(BaseModel):
     project_metadata: dict         # client, project, date, maximo_version
@@ -674,7 +697,7 @@ Sources (chronological):
 Extract all business requirements from these sources.
 ```
 
-`complete_json()` schema = `AnalysisResult` with `RequirementDraft` items (no `id` field). Post-process: assign `BRD-{MODULE}-{NNN}` IDs per §7.5.
+`complete_json()` schema = `AnalysisDraft` (contains `RequirementDraft` items — no `id` field). Post-process via `assign_ids()`: assign `BRD-{MODULE}-{NNN}` IDs per §7.5, producing an `AnalysisResult` with full `Requirement` objects.
 
 ### 12.5 Stage 3a — Generator (`agents/generator.py`)
 
@@ -707,7 +730,7 @@ Generate narrative body text for these sections:
 Each narrative section must reference relevant modules and highlight version-specific considerations.
 ```
 
-Validate output as `BRDDocument`.
+`complete_json()` schema = `NarrativeSet` (just the narrative sections). Post-process: assemble into `BRDDocument` by combining narratives, requirements, metadata, structure, and appendix.
 
 ### 12.6 Stage 3b — DocxRenderer (`services/docx_renderer.py`)
 
@@ -726,13 +749,15 @@ Named Word styles only — no inline fonts (visual branding clone is Milestone 6
 
 ```python
 class LLMClient:
-    def complete(self, messages: list[dict], max_tokens: int = 4096) -> str: ...
-    def complete_json(self, messages: list[dict], schema: type[BaseModel], max_tokens: int = 8192) -> dict: ...
+    def __init__(self, api_key: str, model_id: str): ...
+    def complete(self, messages: list[dict], max_tokens: int = 4096, system: str | None = None) -> str: ...
+    def complete_json(self, messages: list[dict], schema: type[BaseModel], max_tokens: int = 8192, system: str | None = None) -> BaseModel: ...
 ```
 
 - 3 retries, exponential backoff from 2 s.
-- Anthropic: `messages.create`; JSON via tool use (the Pydantic schema becomes the tool's input schema).
-- On Pydantic validation failure: retry once with a "fix this JSON to match the schema" prompt, then fail the run.
+- Anthropic: `messages.create`; JSON via tool use (the Pydantic schema becomes the tool's `input_schema`; `tool_choice` forces the model to call it).
+- `complete_json()` returns the validated `BaseModel` instance directly (not a raw `dict`).
+- On Pydantic validation failure: retry once with a "fix this JSON to match the schema" prompt, then raise `LLMError`.
 - Only file importing the `anthropic` SDK. Milestone 4 adds an `openai` branch behind the same two methods; Milestone 7 adds Ollama.
 
 ---
@@ -863,20 +888,23 @@ cd frontend && npm run dev
 
 Open `http://localhost:5173`. Single-command alternative once stable: `npm run build` in `frontend/`, then FastAPI serves `frontend/dist/` at `/` — one terminal, one URL.
 
-### 16.4 Root `package.json` scripts (target)
+### 16.4 Root `package.json` scripts
 
 ```json
 {
   "scripts": {
-    "dev:backend": "cd backend && uvicorn main:app --reload --port 8765",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:electron": "cd electron && MAXIMOBRD_PORT=8765 BACKEND_DEV=1 npm run start",
-    "build:mac": "npm run build:backend && npm run build:frontend && electron-builder --mac"
+    "dev:backend":    "cd backend && .venv/bin/uvicorn main:app --reload --port 8765 --host 127.0.0.1",
+    "dev:frontend":   "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "test:backend":   "cd backend && .venv/bin/python -m pytest tests/ -q",
+    "app":            "npm run build:frontend && npm run dev:backend"
   }
 }
 ```
 
-(`dev:electron` / `build:mac` activate in Milestone 3.)
+`app` is the single-command mode: builds the frontend into `dist/`, then the FastAPI server serves it at `http://127.0.0.1:8765` — one terminal, one URL.
+
+Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 
 ---
 
@@ -884,18 +912,19 @@ Open `http://localhost:5173`. Single-command alternative once stable: `npm run b
 
 ### 17.1 Unit tests (pytest)
 
-| Module | Tests | Milestone |
-|--------|-------|-----------|
-| `processors/pdf.py` | sample PDF → non-empty text | 1 |
-| `processors/docx.py` | paragraphs + tables | 1 |
-| ID assignment | `BRD-WO-001` sequencing | 1 |
-| `docx_renderer.py` | tables exist, DRAFT header present, named styles only | 1 |
-| `llm_client.py` | retry logic (mocked) | 2 |
-| `structure_extractor.py` | heading hierarchy order | 2 |
+| Module | Tests | Status |
+|--------|-------|--------|
+| `processors/pdf.py` | sample PDF → non-empty text | ✅ `test_processors.py` |
+| `processors/docx.py` | paragraphs + tables | ✅ `test_processors.py` |
+| ID assignment | `BRD-WO-001` sequencing | ✅ `test_id_assignment.py` |
+| `docx_renderer.py` | tables exist, DRAFT header present, named styles only | ✅ `test_docx_renderer.py` |
+| `llm_client.py` | retry logic (mocked) | Milestone 2 |
+| `structure_extractor.py` | heading hierarchy order | Milestone 2 |
 
 ### 17.2 Integration tests
 
-- Create project → upload TXT → wait EXTRACTED → generate (mock LLM) → DOCX file exists. (Milestone 2)
+- Create project → upload TXT → wait EXTRACTED → generate (mock LLM) → DOCX file exists. ✅ `test_pipeline_integration.py`
+- Generate blocked when no EXTRACTED sources. ✅ `test_pipeline_integration.py`
 - Malformed PDF → ERROR status + message. (Milestone 2)
 
 ### 17.3 Manual E2E (Milestone 1 exit criteria)
@@ -910,32 +939,30 @@ Open `http://localhost:5173`. Single-command alternative once stable: `npm run b
 
 ## 18. Milestone Plan
 
-### Milestone 0 — Scaffold (1–2 days)
+### Milestone 0 — Scaffold ✅ Complete
 
-- [ ] Repo scaffold: `backend/` (FastAPI + `/health`), `frontend/` (Vite + React + Tailwind + router shell)
-- [ ] React page fetches and displays `/health` through the Vite proxy
-- [ ] Create prerequisite artifacts: `brd_default_structure.json`, prompt files (§12), stub `maximo-76.md` + `mas-9.md`
-- [ ] `keyring` round-trip smoke test (write/read/delete a dummy value in Keychain)
+- [x] Repo scaffold: `backend/` (FastAPI + `/health`), `frontend/` (Vite + React + Tailwind + router shell)
+- [x] React page fetches and displays `/health` through the Vite proxy
+- [x] Create prerequisite artifacts: `brd_default_structure.json`, prompt files (§12), stub `maximo-76.md` + `mas-9.md`
+- [x] `keyring` round-trip smoke test (write/read/delete a dummy value in Keychain)
 
-**Done when:** browser shows green health check; prompt/template/knowledge files exist.
-
-### Milestone 1 — Working MVP (~2 weeks)
+### Milestone 1 — Working MVP ✅ Complete
 
 *Week 1 — data path:*
 
-- [ ] SQLite schema (§9.1) + `create_all` on startup
-- [ ] Project CRUD routes + ProjectList/ProjectDetail UI
-- [ ] Streaming upload endpoint + all four text processors + background extraction + status badges
-- [ ] Media files stored as PENDING; unknown types → ERROR
+- [x] SQLite schema (§9.1) + `create_all` on startup
+- [x] Project CRUD routes + ProjectList/ProjectDetail UI
+- [x] Streaming upload endpoint + all four text processors + background extraction + status badges
+- [x] Media files stored as PENDING; unknown types → ERROR
 
 *Week 2 — AI path:*
 
-- [ ] Settings routes + Keychain storage + Settings page + Test Connection
-- [ ] `LLMClient` (Anthropic) with retries + JSON-via-tool-use
-- [ ] Pipeline: pre-flight, 4 agents, ProgressBus, SSE stream, run row lifecycle
-- [ ] `DocxRenderer` per §12.6 + download endpoint + Generate page
+- [x] Settings routes + Keychain storage + Settings page + Test Connection
+- [x] `LLMClient` (Anthropic) with retries + JSON-via-tool-use
+- [x] Pipeline: pre-flight, 4 agents, ProgressBus, SSE stream, run row lifecycle
+- [x] `DocxRenderer` per §12.6 + download endpoint + Generate page
 
-**Done when:** all of §17.3 passes — a real BRD from real documents, downloaded from the browser.
+**Also delivered:** `agents/runner.py` (pipeline orchestrator), `services/keystore.py` (Keychain wrapper), `routes/__init__.py` (error envelope helper), `frontend/src/api.js` (single API layer), `frontend/src/components/StatusBadge.jsx`, and four pytest test files (processors, ID assignment, DOCX renderer, full pipeline integration with mocked LLM).
 
 ### Milestone 2 — Hardening + spec completion (1–2 weeks)
 
@@ -1025,8 +1052,8 @@ Open `http://localhost:5173`. Single-command alternative once stable: `npm run b
 
 | Question | Answer |
 |----------|--------|
-| When is something working? | End of Milestone 1 (~2 weeks): real BRD from real documents, in the browser |
+| Is anything working now? | Yes — Milestone 1 complete: real BRD from real documents, downloadable from the browser |
+| What's next? | Milestone 2: cancel mid-run, branded template upload, structured errors, test coverage hardening |
 | Does the MVP lock us in? | No — backend, API, schema, and UI carry into Electron unchanged; key storage and dialogs are the only swaps |
 | What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18 — nothing from the blueprint was dropped |
-| What's still judgment calls during build? | Visual polish, exact Tailwind styling, PyInstaller edge cases |
-| What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored) |
+| What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored before real client use) |
