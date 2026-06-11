@@ -151,7 +151,8 @@ maximobrd/
 │   │   ├── App.jsx
 │   │   ├── api.js                    (single API layer — fetch/EventSource; swaps to IPC in M3)
 │   │   ├── components/
-│   │   │   └── StatusBadge.jsx
+│   │   │   ├── StatusBadge.jsx
+│   │   │   └── ErrorBoundary.jsx        (wraps all routes — structured error fallback)
 │   │   ├── pages/
 │   │   │   ├── ProjectList.jsx
 │   │   │   ├── ProjectDetail.jsx
@@ -1011,7 +1012,7 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 - [x] Unit + integration tests per §17.1–17.2; SSE replay for late connections covered by tests
 - [ ] ~~Optional: introduce Alembic~~ — skipped: no schema churn yet and it would add a dependency; revisit at the Milestone 3 DB split
 
-**Done when:** the app survives bad inputs gracefully and the test suite is green. *(Met — 35 backend tests passing.)*
+**Done when:** the app survives bad inputs gracefully and the test suite is green. *(Met — 43 backend tests passing.)*
 
 ### Milestone 3 — Desktop shell (1–2 weeks)
 
