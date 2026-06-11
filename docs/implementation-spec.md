@@ -1,10 +1,11 @@
-# MaximoBRD — Self-Contained Implementation Specification
+# MaximoBRD — Implementation Specification (MVP-First)
 
-This document is everything needed to implement the project without referring back to `docs/plan.md` or `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and includes a phased build order with acceptance criteria.
+This document is everything needed to implement the project without referring back to `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and lays out a milestone plan that produces a **working application within the first two weeks** and grows it — without rework — into the full desktop product.
 
-**Status:** Ready for Phase 1 implementation  
-**Platform:** macOS MVP (Windows in Phase 5)  
-**Stack:** Electron + React + Vite + Tailwind + Zustand + Python FastAPI + SQLite
+**Status:** Ready for Milestone 0
+**Platform:** macOS first (Windows later)
+**MVP shape:** Local web app — Python FastAPI backend + React frontend in the browser at `localhost`
+**Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3)
 
 ---
 
@@ -19,79 +20,133 @@ A local-first desktop app for IBM Maximo consultants that:
 
 ---
 
-## 2. Locked Decisions
+## 2. Build Strategy — Walking Skeleton
 
-| Topic | Decision |
-|-------|----------|
-| AI providers (Phase 1) | Anthropic Claude + OpenAI |
-| API keys | Electron `safeStorage` only — never in DB, logs, or `.env` |
-| Project data | User-chosen folder per project + portable `project.db` |
-| Global data | `app.db` in OS app data (project index + non-secret settings) |
-| BRD structure | Branded DOCX → extract heading hierarchy; else `brd_default_structure.json` |
-| BRD styling | Named Word styles only in Phase 1; visual branding clone → Phase 3 |
-| Traceability (MVP) | Document-level (`source_ref` = filename) |
-| Progress | SSE only — no polling |
-| Agents | Sequential only — no parallel agent execution |
-| Context overflow | Per-source summarization when `char_count > TOKEN_THRESHOLD` |
-| Text files (Phase 1) | PDF, DOCX, TXT, MD, XLSX, XLS — extracted on upload |
-| Media files (Phase 1) | Accepted and stored; status `PENDING`; skipped in pipeline |
-| Maximo versions (Phase 1) | 7.6.0.x, 7.6.1.x, MAS 9.x enabled; MAS 8.x disabled ("Coming soon") |
-| Distribution | Internal use; DMG build; no notarization in Phase 1 |
+The previous revision of this spec front-loaded Electron, dual AI providers, and packaging into one 6–8 week phase; the first end-to-end BRD would not have existed until week 5–6. This revision inverts that:
+
+> **Build the thinnest complete slice first** (project → upload → pipeline → DOCX), running in the browser, then thicken it milestone by milestone until it matches the full blueprint.
+
+```
+ Milestone 0        Milestone 1            Milestone 2         Milestone 3        Milestone 4+
+ (1–2 days)         (~2 weeks)             (1–2 weeks)         (1–2 weeks)        (per roadmap)
+┌────────────┐   ┌─────────────────┐   ┌────────────────┐   ┌──────────────┐   ┌──────────────┐
+│ Scaffold + │   │  WORKING MVP    │   │  Hardening +   │   │  Electron    │   │ OpenAI, media│
+│ health     │ → │  upload → BRD   │ → │  branded tmpl, │ → │  shell, DMG, │ → │ MAS 8, brand │
+│ check      │   │  in the browser │   │  cancel, tests │   │  safeStorage │   │ clone,Ollama,│
+└────────────┘   └─────────────────┘   └────────────────┘   └──────────────┘   │ Windows      │
+                                                                               └──────────────┘
+```
+
+**Why nothing is thrown away later:** the FastAPI backend, REST/SSE contracts, SQLite schema, agents, prompts, and the entire React UI are identical in browser and Electron modes. When Electron arrives (Milestone 3) it only adds a window around the same `localhost` app, swaps API-key storage from macOS Keychain to Electron `safeStorage`, and replaces browser file pickers with native dialogs.
 
 ---
 
-## 3. Architecture
+## 3. Decisions
+
+### 3.1 MVP decisions (Milestones 0–1)
+
+| Topic | MVP decision |
+|-------|--------------|
+| Shell | Browser at `http://127.0.0.1:8765` — no Electron yet |
+| AI provider | **Anthropic Claude only** (`claude-sonnet-4-6` default) |
+| API key storage | macOS Keychain via Python `keyring` — never in DB, logs, code, or `.env` |
+| Database | **One SQLite file** `app.db` in OS app-data dir (projects + sources + runs + settings) |
+| Migrations | None yet — `SQLAlchemy create_all()` at startup |
+| Project files | Per-project folder, default `~/MaximoBRD/{client}-{project}` (path editable as text) |
+| BRD structure | `brd_default_structure.json` only |
+| Traceability | Document-level (`source_ref` = filename) |
+| Progress | SSE only — no client polling |
+| Agents | Sequential only — no parallel agent execution |
+| Context overflow | Per-source summarization when `char_count > TOKEN_THRESHOLD` |
+| Text files | PDF, DOCX, TXT, MD, XLSX, XLS — extracted on upload |
+| Media files | Accepted and stored; status `PENDING`; skipped in pipeline |
+| Maximo versions | 7.6.0.x, 7.6.1.x, MAS 9.x enabled; MAS 8.x disabled ("Coming soon") |
+| Export | Browser file download of the DOCX |
+
+### 3.2 Deferred decisions (still part of the target — moved, not dropped)
+
+| Topic | Target decision | Lands in |
+|-------|-----------------|----------|
+| Electron shell + IPC + native dialogs | Per §13 | Milestone 3 |
+| API keys in Electron `safeStorage` (migrated from Keychain) | Per §13.3 | Milestone 3 |
+| Portable per-project `project.db` | Split rows out of `app.db` by `project_id` (schema already keyed for it) | Milestone 3 (with Electron packaging) |
+| Branded DOCX → heading-structure extraction | `StructureExtractor` | Milestone 2 |
+| OpenAI as second provider | Same `LLMClient` interface | Milestone 4 |
+| Audio/video/image processing (Whisper, ffmpeg, vision) | `PENDING → TRANSCRIBING → EXTRACTED` | Milestone 5 |
+| MAS 8.x knowledge + enablement | `mas-8.md` | Milestone 5 |
+| Visual branding clone (fonts/logo/tables) | `BrandingProfile` | Milestone 6 |
+| Ollama local models | `OllamaProvider` | Milestone 7 |
+| Windows build, signing, onboarding polish | electron-builder + PyInstaller | Milestone 8 |
+| Alembic migrations | Introduce once schema churn matters | Milestone 2–3 |
+
+---
+
+## 4. MVP Scope (Milestone 1 exit)
+
+**A consultant can:** create a project → upload PDF/DOCX/TXT/MD/XLSX files → click Generate → watch live progress → download a DRAFT-watermarked DOCX BRD with `BRD-{MODULE}-{NNN}` requirement tables citing source filenames.
+
+**Explicitly in:** project CRUD, streaming upload, background text extraction with status badges, Claude settings + Keychain key + test connection, 3-stage pipeline with SSE progress, summarization fallback for oversized sources, DOCX render + download, media files accepted as `PENDING` without breaking generation.
+
+**Explicitly out (per §3.2):** Electron, branding, OpenAI, cancel mid-run (Milestone 2), run-history polish, media processing, packaging.
+
+---
+
+## 5. Architecture
+
+### 5.1 MVP architecture (Milestones 0–2)
+
+```
+Browser (React + Vite + Tailwind + Zustand)
+   │  fetch / EventSource
+   ▼
+FastAPI @ 127.0.0.1:8765
+  ├── routes/       REST + SSE
+  ├── services/     LLMClient (Anthropic), DocxRenderer, ProgressBus
+  ├── agents/       extractor, summarizer, analyzer, generator (sequential)
+  ├── processors/   per file-type text extraction
+  ├── models/       Pydantic inter-stage contracts
+  └── db/           SQLAlchemy (sync) + SQLite
+
+macOS Keychain (via `keyring`)   ← API key lives here only
+
+App data dir (~/Library/Application Support/MaximoBRD/)
+  └── app.db
+
+Project folder (default ~/MaximoBRD/{client}-{project}/)
+  ├── sources/          raw uploads
+  ├── extracted/        {source_id}.txt sidecars
+  └── output/           {run_id}.docx
+```
+
+Implementation simplicity choices (beginner-friendly, low maintenance):
+
+- **Sync SQLAlchemy** sessions in `def` endpoints (FastAPI runs them in a threadpool). No async DB driver, no Alembic yet.
+- **Pipeline runs as a FastAPI `BackgroundTask`**; it publishes progress events to an in-memory **ProgressBus** (`dict[run_id] → list[event]`). The SSE endpoint streams new events from that list (server-side check every ~300 ms; the client never polls).
+- **One process to debug** in MVP: `uvicorn`. Vite dev server proxies `/api` during development; `npm run build` output can be served by FastAPI for a single-command run.
+
+### 5.2 Target architecture (after Milestone 3)
 
 ```
 Electron Main
   ├── spawns uvicorn (dynamic port via env MAXIMOBRD_PORT)
   ├── safeStorage for API keys
-  └── IPC preload bridge
-
-Electron Renderer (React)
-  └── Zustand stores → IPC → localhost:PORT
-
-FastAPI Backend
-  ├── routes/       REST + SSE
-  ├── services/     LLMClient, DocxRenderer, StructureExtractor
-  ├── agents/       extractor, summarizer, analyzer, generator (sequential)
-  ├── processors/   per file-type text extraction
-  ├── models/       Pydantic inter-stage contracts
-  └── db/           SQLAlchemy async + Alembic
-
-Project Folder (user path)
-  ├── project.db
-  ├── sources/          raw uploads
-  ├── extracted/        {source_id}.txt sidecars
-  ├── branding/         optional branded reference DOCX
-  └── output/           {run_id}.docx
-
-App Bundle / Repo
-  ├── knowledge/versions/*.md
-  └── templates/brd_default_structure.json
+  └── IPC preload bridge (api:call, storage:*, dialog:*)
+        │
+Electron Renderer = the same React app
+        │
+FastAPI backend = unchanged
 ```
 
-### Process lifecycle
-
-1. `main.js` finds free TCP port → sets `MAXIMOBRD_PORT` → spawns `uvicorn backend.main:app`.
-2. Poll `GET /health` every 500ms, max 30s, before showing main window.
-3. On quit: SIGTERM child process; wait 5s; SIGKILL if needed.
-
-### Dev vs production backend path
-
-- **Dev:** `uvicorn` runs from repo `backend/` with system Python venv.
-- **Prod:** PyInstaller binary bundled in Electron `resources/backend/`.
+Process lifecycle (Milestone 3): find free port → spawn uvicorn → poll `GET /health` every 500 ms (max 30 s) → show window; on quit SIGTERM, wait 5 s, SIGKILL. Dev mode keeps using an external uvicorn via `BACKEND_DEV=1`.
 
 ---
 
-## 4. Repository Layout
+## 6. Repository Layout
+
+Laid out from day one so Electron drops in without restructuring:
 
 ```
 maximobrd/
-├── electron/
-│   ├── main.js
-│   ├── preload.js
-│   └── package.json
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx
@@ -107,18 +162,20 @@ maximobrd/
 │   │       └── pipelineStore.js
 │   ├── package.json
 │   ├── tailwind.config.js
-│   └── vite.config.js
+│   └── vite.config.js            (dev proxy /api → 127.0.0.1:8765)
 ├── backend/
 │   ├── main.py
 │   ├── config.py
 │   ├── routes/
 │   │   ├── projects.py
+│   │   ├── sources.py
 │   │   ├── pipeline.py
 │   │   └── settings.py
 │   ├── services/
 │   │   ├── llm_client.py
 │   │   ├── docx_renderer.py
-│   │   └── structure_extractor.py
+│   │   ├── progress_bus.py
+│   │   └── structure_extractor.py     (Milestone 2)
 │   ├── agents/
 │   │   ├── extractor.py
 │   │   ├── summarizer.py
@@ -126,12 +183,11 @@ maximobrd/
 │   │   └── generator.py
 │   ├── processors/
 │   │   ├── pdf.py, docx.py, xlsx.py, plaintext.py
-│   │   └── (audio.py, video.py, image.py — Phase 2)
+│   │   └── (audio.py, video.py, image.py — Milestone 5)
 │   ├── models/
 │   │   ├── project.py, pipeline.py, settings.py
 │   ├── db/
-│   │   ├── database.py
-│   │   └── migrations/
+│   │   └── database.py
 │   ├── prompts/
 │   │   ├── summarizer.txt
 │   │   ├── analyzer_system.txt
@@ -140,22 +196,28 @@ maximobrd/
 │   │   └── generator_user.txt
 │   ├── templates/
 │   │   └── brd_default_structure.json
+│   ├── tests/
 │   └── requirements.txt
 ├── knowledge/versions/
 │   ├── maximo-76.md
-│   ├── mas-8.md          (Phase 2)
-│   └── mas-9.md
+│   ├── mas-9.md
+│   └── mas-8.md                  (Milestone 5)
+├── electron/                     (created in Milestone 3)
 ├── docs/
-│   ├── plan.md
-│   └── implementation-spec.md   (this document)
-└── package.json                   (workspace root + electron-builder)
+│   ├── blueprint.md
+│   └── implementation-spec.md    (this document)
+└── package.json                  (root convenience scripts)
 ```
+
+### Backend dependencies (MVP — confirm before installing)
+
+`fastapi`, `uvicorn`, `sqlalchemy`, `pydantic`, `python-multipart`, `aiofiles`, `python-docx`, `pymupdf`, `openpyxl`, `anthropic`, `keyring`, `pytest` (dev).
 
 ---
 
-## 5. Prerequisites (Create Before Coding)
+## 7. Prerequisites (Create Before Coding)
 
-### 5.1 `templates/brd_default_structure.json`
+### 7.1 `backend/templates/brd_default_structure.json`
 
 ```json
 {
@@ -177,18 +239,18 @@ maximobrd/
 }
 ```
 
-### 5.2 Maximo version mapping
+### 7.2 Maximo version mapping
 
-| UI label | `maximo_version` key | Knowledge file | Phase 1 |
-|----------|----------------------|----------------|---------|
+| UI label | `maximo_version` key | Knowledge file | MVP |
+|----------|----------------------|----------------|-----|
 | Maximo 7.6.0.x | `maximo-760` | `maximo-76.md` | Enabled |
 | Maximo 7.6.1.x | `maximo-761` | `maximo-76.md` | Enabled |
-| MAS 8.x | `mas-8` | `mas-8.md` | Disabled |
+| MAS 8.x | `mas-8` | `mas-8.md` | Disabled ("Coming soon") |
 | MAS 9.x | `mas-9` | `mas-9.md` | Enabled |
 
-### 5.3 Knowledge file minimum content (each file)
+### 7.3 Knowledge file minimum content
 
-Each `knowledge/versions/*.md` must include these H2 sections:
+Each `knowledge/versions/*.md` must include these H2 sections — content is injected verbatim into analyzer/generator system prompts; never hardcode version facts in Python:
 
 - Platform Overview
 - Deployment Model
@@ -199,18 +261,19 @@ Each `knowledge/versions/*.md` must include these H2 sections:
 - Upgrade / Migration Considerations
 - Known Platform Limitations
 
-Content is injected verbatim into analyzer/generator system prompts. Do not hardcode version facts in Python.
+Stubs are acceptable for Milestone 0–1 bring-up; full prose is a parallel content task that must be done before real client use.
 
-### 5.4 Default AI models
+### 7.4 Default AI model
 
 | Provider | Default `model_id` | Settings placeholder |
 |----------|-------------------|----------------------|
 | `anthropic` | `claude-sonnet-4-6` | Claude Sonnet 4.6 |
-| `openai` | `gpt-4o` | GPT-4o |
 
-### 5.5 Maximo module codes (for `BRD-{MODULE}-{NNN}`)
+(`openai` / `gpt-4o` row returns in Milestone 4.)
 
-Allowed `MODULE` values (3–8 uppercase letters):
+### 7.5 Maximo module codes (for `BRD-{MODULE}-{NNN}`)
+
+Allowed `MODULE` values:
 
 ```
 WO, ASSET, INV, PURCH, PM, SR, LABOR, CAL, BUDGET, METER, ROUTES, SLA, LOC, PERSON, COMP, SAFETY, CONTRACT, RFQ, REORDER, GL, ESCALATION, KPI, MOBILE, INTEGRATION, GENERAL
@@ -224,7 +287,7 @@ ID assignment (deterministic, post-LLM):
 
 ---
 
-## 6. Source Processing State Machine
+## 8. Source Processing State Machine
 
 ```
                     ┌─────────────┐
@@ -242,9 +305,9 @@ ID assignment (deterministic, post-LLM):
   │  EXTRACTED  │          │          │    ERROR    │
   └─────────────┘          │          └─────────────┘
                            │
-              (audio/video/image Phase 1)
+              (audio/video/image — until Milestone 5)
                     ┌──────▼──────┐
-                    │   PENDING   │  "Processing available in Phase 2"
+                    │   PENDING   │  "Processing available in a later release"
                     └─────────────┘
 ```
 
@@ -262,59 +325,38 @@ ID assignment (deterministic, post-LLM):
 | docx | `docx` | UPLOADED → EXTRACTING | Yes |
 | txt, md | `plaintext` | UPLOADED → EXTRACTING | Yes |
 | xlsx, xls | `spreadsheet` | UPLOADED → EXTRACTING | Yes |
-| mp3, wav, m4a, ogg | `audio` | PENDING | No (Phase 2) |
-| mp4, mov, webm | `video` | PENDING | No (Phase 2) |
-| png, jpg, jpeg, webp | `image` | PENDING | No (Phase 2) |
+| mp3, wav, m4a, ogg | `audio` | PENDING | No (Milestone 5) |
+| mp4, mov, webm | `video` | PENDING | No (Milestone 5) |
+| png, jpg, jpeg, webp | `image` | PENDING | No (Milestone 5) |
 | other | `unknown` | ERROR | No — error message set |
 
 ---
 
-## 7. Data Models
+## 9. Data Models
 
-### 7.1 Database — Global `app.db`
+### 9.1 Database — single `app.db` (MVP)
 
-**`projects_index`**
+One SQLite file in the OS app-data dir. All per-project tables carry `project_id`, so splitting into a portable per-project `project.db` in Milestone 3 is a data move, not a redesign.
+
+**`projects`**
 
 | Column | Type | Notes |
 |--------|------|-------|
-| id | UUID PK | Same as project.id |
+| id | UUID PK | |
 | client_name | TEXT | |
 | project_name | TEXT | |
-| folder_path | TEXT UNIQUE | Absolute path |
-| maximo_version | TEXT | |
-| created_at | DATETIME | |
-| updated_at | DATETIME | |
-
-**`provider_settings`**
-
-| Column | Type | Notes |
-|--------|------|-------|
-| id | INT PK | Singleton row `id=1` |
-| provider | TEXT | `anthropic` \| `openai` |
-| model_id | TEXT | |
-| api_key_storage_key | TEXT | Key name in safeStorage, e.g. `maximobrd.api_key` |
-| updated_at | DATETIME | |
-
-### 7.2 Database — Per-project `project.db`
-
-**`projects`** (singleton metadata row)
-
-| Column | Type |
-|--------|------|
-| id | UUID PK |
-| client_name | TEXT |
-| project_name | TEXT |
-| project_date | DATE |
-| maximo_version | TEXT |
-| folder_path | TEXT |
-| branded_docx_path | TEXT NULL |
-| created_at | DATETIME |
+| project_date | DATE | |
+| maximo_version | TEXT | key from §7.2 |
+| folder_path | TEXT UNIQUE | absolute path |
+| branded_docx_path | TEXT NULL | used from Milestone 2 |
+| created_at / updated_at | DATETIME | |
 
 **`sources`**
 
 | Column | Type |
 |--------|------|
 | id | UUID PK |
+| project_id | UUID FK |
 | filename | TEXT |
 | filepath | TEXT |
 | filetype | TEXT |
@@ -332,7 +374,8 @@ ID assignment (deterministic, post-LLM):
 | Column | Type |
 |--------|------|
 | id | UUID PK |
-| status | TEXT |
+| project_id | UUID FK |
+| status | TEXT (`RUNNING`, `DONE`, `FAILED`, `CANCELLED`) |
 | started_at | DATETIME |
 | completed_at | DATETIME NULL |
 | output_path | TEXT NULL |
@@ -340,7 +383,18 @@ ID assignment (deterministic, post-LLM):
 | sources_used_count | INTEGER |
 | skipped_sources_count | INTEGER |
 
-### 7.3 Pydantic — Pipeline contracts (`backend/models/pipeline.py`)
+**`provider_settings`** (singleton row `id=1`)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INT PK | always 1 |
+| provider | TEXT | `anthropic` (MVP) |
+| model_id | TEXT | |
+| updated_at | DATETIME | |
+
+The API key is **not** a column anywhere. It lives in the macOS Keychain under service `maximobrd`, account `api_key` (and under Electron `safeStorage` from Milestone 3).
+
+### 9.2 Pydantic — pipeline contracts (`backend/models/pipeline.py`)
 
 ```python
 # Requirement (pre-ID assignment from LLM)
@@ -394,13 +448,13 @@ class NarrativeSection(BaseModel):
 
 class BRDDocument(BaseModel):
     project_metadata: dict         # client, project, date, maximo_version
-    structure: list[dict]          # ordered sections from template or branded DOCX
+    structure: list[dict]          # ordered sections from template (or branded DOCX, M2+)
     narratives: list[NarrativeSection]
     requirements: list[Requirement]
     appendix_sources: list[str]    # unique filenames used
 ```
 
-### 7.4 Requirement table columns (DOCX)
+### 9.3 Requirement table columns (DOCX)
 
 Each module subsection under "Business Requirements" renders one `python-docx` Table:
 
@@ -417,21 +471,17 @@ Header row: bold. All cells: Normal style (no inline fonts).
 
 ---
 
-## 8. API Contract
+## 10. API Contract
 
-Base URL: `http://127.0.0.1:{PORT}`  
-All errors: `{ "error": { "code": "STRING", "message": "Human readable" } }`  
-Never return Python stack traces to the renderer.
+Base URL: `http://127.0.0.1:8765` (port from `MAXIMOBRD_PORT`, default 8765)
+All errors: `{ "error": { "code": "STRING", "message": "Human readable" } }`
+Never return Python stack traces to the client.
 
-### 8.1 Health
+### 10.1 Health
 
-`GET /health` → `200`
+`GET /health` → `200` `{ "status": "ok", "version": "0.1.0" }`
 
-```json
-{ "status": "ok", "version": "0.1.0" }
-```
-
-### 8.2 Projects
+### 10.2 Projects
 
 `POST /projects`
 
@@ -441,44 +491,26 @@ Never return Python stack traces to the renderer.
   "project_name": "EAM Upgrade",
   "project_date": "2026-06-01",
   "maximo_version": "mas-9",
-  "folder_path": "/Users/consultant/Projects/acme-eam"
+  "folder_path": "/Users/consultant/MaximoBRD/acme-eam"
 }
 ```
 
-Response `201`:
+`folder_path` is optional — defaults to `~/MaximoBRD/{client-slug}-{project-slug}`. Response `201` returns the full project object. Side effects: create `sources/`, `extracted/`, `output/` subfolders; insert row.
 
-```json
-{
-  "id": "uuid",
-  "client_name": "Acme Corp",
-  "project_name": "EAM Upgrade",
-  "project_date": "2026-06-01",
-  "maximo_version": "mas-9",
-  "folder_path": "/Users/consultant/Projects/acme-eam",
-  "branded_docx_path": null,
-  "created_at": "2026-06-07T10:00:00Z"
-}
-```
+- `GET /projects` → `200` list.
+- `GET /projects/{id}` → `200` full project + source count + latest run.
+- `DELETE /projects/{id}` → `204` (removes DB rows only; never deletes the folder).
+- `PUT /projects/{id}/branding` — **Milestone 2** — multipart branded DOCX → `branding/reference.docx`, updates `branded_docx_path`, returns extracted heading preview.
 
-Side effects: create folder structure, `project.db`, register in `app.db`.
-
-`GET /projects` → `200` list of project summaries from `app.db`.
-
-`GET /projects/{id}` → `200` full project + source count + latest run.
-
-`DELETE /projects/{id}` → `204` (removes from index only; does not delete folder).
-
-`PUT /projects/{id}/branding` — multipart upload of branded DOCX → saves to `branding/reference.docx`, updates `branded_docx_path`.
-
-### 8.3 Sources
+### 10.3 Sources
 
 `POST /projects/{id}/sources/upload`
 
-- **Content-Type:** `multipart/form-data`
-- **Fields:** `file` (binary stream), optional `source_timestamp` (ISO string), optional `user_timestamp_override` (ISO string)
-- **Filename collision:** append `_{n}` before extension (`workshop.pdf` → `workshop_1.pdf`)
-- **Max size:** 500 MB (configurable `MAX_UPLOAD_BYTES`)
-- Streams to disk via `aiofiles`; never buffers full file in RAM
+- `multipart/form-data`: `file` (binary), optional `source_timestamp` (ISO), optional `user_timestamp_override` (ISO).
+- Filename collision: append `_{n}` before extension (`workshop.pdf` → `workshop_1.pdf`).
+- Max size 500 MB (`MAX_UPLOAD_BYTES`); streamed to disk via `aiofiles`, never fully buffered in RAM.
+- If no timestamp supplied, use the file's modified time when the browser provides it, else upload time.
+- Extraction runs as a `BackgroundTask` immediately after upload.
 
 Response `201`:
 
@@ -493,84 +525,41 @@ Response `201`:
 }
 ```
 
-Extraction runs as FastAPI `BackgroundTask` immediately after upload.
+- `GET /projects/{id}/sources` → `200` array (UI refreshes this after upload and while badges show `EXTRACTING`-at-upload-time only; no pipeline polling).
+- `DELETE /projects/{id}/sources/{source_id}` → `204` (file + sidecar + row).
+- `PATCH /projects/{id}/sources/{source_id}` → `{ "user_timestamp_override": "2026-05-10T14:00:00Z" }`.
 
-`GET /projects/{id}/sources` → `200` array of source objects.
+### 10.4 Settings
 
-`DELETE /projects/{id}/sources/{source_id}` → `204` (deletes file + sidecar + DB row).
+MVP key flow (no Electron yet): the key passes through one POST over localhost, is written straight to the macOS Keychain, and is never persisted or logged anywhere else.
 
-`PATCH /projects/{id}/sources/{source_id}`
+- `GET /settings/provider` → `200` `{ "provider": "anthropic", "model_id": "claude-sonnet-4-6", "configured": true }` (`configured` = key exists in Keychain).
+- `POST /settings/provider` → `{ "provider": "anthropic", "model_id": "claude-sonnet-4-6" }`.
+- `POST /settings/api-key` → `{ "api_key": "sk-ant-..." }` → stored via `keyring`; response `{ "success": true }`. Key is masked in the UI after save.
+- `DELETE /settings/api-key` → removes from Keychain.
+- `POST /settings/provider/test` → reads key from Keychain, makes a minimal completion ("Reply OK") → `{ "success": true, "latency_ms": 842 }`.
 
-```json
-{ "user_timestamp_override": "2026-05-10T14:00:00Z" }
-```
+From Milestone 3 this migrates to the safeStorage + `X-API-Key` header-injection design in §13.3.
 
-### 8.4 Settings
-
-API keys never pass through FastAPI in production storage. Flow:
-
-1. Renderer calls `storage:set` via IPC with key `maximobrd.api_key`.
-2. Renderer calls `POST /settings/provider` with provider + model only.
-3. On LLM call, main process injects key into backend via `X-API-Key` header on internal requests only (localhost).
-
-`GET /settings/provider` → `200`
-
-```json
-{
-  "provider": "anthropic",
-  "model_id": "claude-sonnet-4-6",
-  "configured": true
-}
-```
-
-`POST /settings/provider`
-
-```json
-{ "provider": "anthropic", "model_id": "claude-sonnet-4-6" }
-```
-
-`POST /settings/provider/test` — backend reads key from request header `X-API-Key` (supplied by IPC layer), makes minimal completion ("Reply OK"), returns:
-
-```json
-{ "success": true, "latency_ms": 842 }
-```
-
-### 8.5 Pipeline
+### 10.5 Pipeline
 
 `POST /projects/{id}/generate`
 
-- Validates: provider configured, ≥1 `EXTRACTED` source.
-- Creates `pipeline_runs` row with `status=RUNNING`.
-- Starts background pipeline task.
-- Returns `202`:
+- Validates: provider configured (key in Keychain), ≥1 `EXTRACTED` source.
+- Creates `pipeline_runs` row `status=RUNNING`, starts background pipeline task.
+- Returns `202` `{ "run_id": "uuid", "status": "RUNNING" }`.
 
-```json
-{ "run_id": "uuid", "status": "RUNNING" }
-```
-
-`GET /pipeline/{run_id}` → run metadata.
-
-`GET /pipeline/{run_id}/stream` — SSE (see §9).
-
-`POST /pipeline/{run_id}/cancel` → `200` — sets cancel flag; pipeline checks between stages.
-
-`GET /pipeline/{run_id}/download` → `application/vnd.openxmlformats-officedocument.wordprocessingml.document` stream.
-
-`GET /projects/{id}/runs` → list of past pipeline runs.
+- `GET /pipeline/{run_id}` → run metadata.
+- `GET /pipeline/{run_id}/stream` — SSE (§11).
+- `POST /pipeline/{run_id}/cancel` — **Milestone 2** — sets cancel flag; pipeline checks between stages.
+- `GET /pipeline/{run_id}/download` → DOCX stream with `Content-Disposition: attachment` (browser saves it; native save dialog arrives with Electron).
+- `GET /projects/{id}/runs` → list of past runs.
 
 ---
 
-## 9. SSE Event Specification
+## 11. SSE Event Specification
 
-**Upload progress:** for MVP, upload progress is an IPC-level byte callback from the renderer during fetch; refresh source status via `GET /sources` after upload completes.
-
-**Pipeline stream** `GET /pipeline/{run_id}/stream`
-
-```
-Content-Type: text/event-stream
-```
-
-Event format:
+`GET /pipeline/{run_id}/stream` — `Content-Type: text/event-stream`, fed by the in-memory ProgressBus.
 
 ```
 event: progress
@@ -596,52 +585,34 @@ data: {"stage":"failed","message":"Analysis validation failed","percent":0,"run_
 | done | 100 |
 | failed | — |
 
-Stream closes after `done` or `error`. Frontend reconnect: not required for MVP.
+Stream closes after `done` or `error`. If the client connects after the run finished, replay the stored events then close. Reconnect logic: not required for MVP.
 
 ---
 
-## 10. IPC Contract (`electron/preload.js`)
+## 12. Pipeline Implementation Detail
 
-| Channel | Direction | Payload | Returns |
-|---------|-----------|---------|---------|
-| `api:call` | renderer → main | `{ method, path, body?, headers? }` | `{ status, data }` |
-| `api:stream` | renderer → main | `{ path }` | emits `api:stream:event` |
-| `storage:set` | renderer → main | `{ key, value }` | `boolean` |
-| `storage:get` | renderer → main | `{ key }` | `string \| null` |
-| `dialog:openFiles` | renderer → main | `{ filters?, multi? }` | `string[]` |
-| `dialog:openFolder` | renderer → main | `{}` | `string \| null` |
-| `dialog:saveFile` | renderer → main | `{ defaultPath, filters? }` | `string \| null` |
+### 12.1 Pre-flight
 
-`api:call` automatically attaches `X-API-Key` from safeStorage when path starts with `/settings/` test or any `/pipeline/` generate path needs it — implement: attach key header on all backend calls except `GET /health` and `GET /projects`.
-
----
-
-## 11. Pipeline Implementation Detail
-
-### 11.1 Pre-flight
-
-1. Load `project` from `project.db`.
+1. Load project row.
 2. Load knowledge: `VERSION_MAP[maximo_version]` → read `.md` file.
-3. Load BRD structure:
-   - If `branded_docx_path` set → `StructureExtractor.extract_headings()` → `list[str]`.
-   - Else → load `brd_default_structure.json` → `sections[].title`.
+3. Load BRD structure: `brd_default_structure.json` (MVP). From Milestone 2: if `branded_docx_path` set → `StructureExtractor.extract_headings()` instead.
 4. Load sources where `processing_status == EXTRACTED`, ordered by effective timestamp (`user_timestamp_override ?? source_timestamp`).
-5. Load provider config + API key (from IPC header).
+5. Read API key from Keychain (M3+: from `X-API-Key` header).
 
-### 11.2 Stage 1 — Extractor (`agents/extractor.py`)
+### 12.2 Stage 1 — Extractor (`agents/extractor.py`)
 
 For each eligible source:
 
-1. Read `extracted/{source_id}.txt` if exists and non-empty.
+1. Read `extracted/{source_id}.txt` if it exists and is non-empty.
 2. Else dispatch processor, write sidecar, update DB.
 3. Build `ExtractedSource`.
 4. Emit SSE per file.
 
-### 11.3 Stage 2a — Summarizer (`agents/summarizer.py`)
+### 12.3 Stage 2a — Summarizer (`agents/summarizer.py`)
 
-`TOKEN_THRESHOLD` = env var, default `12000` characters.
+Runs only for sources with `char_count > TOKEN_THRESHOLD` (default 12 000 chars).
 
-**Prompt template** (`prompts/summarizer.txt`):
+**Prompt** (`prompts/summarizer.txt`):
 
 ```
 You are compressing source material for a Maximo BRD analysis pass.
@@ -666,7 +637,7 @@ DATE: {timestamp}
 [excerpt]
 ```
 
-### 11.4 Stage 2b — Analyzer (`agents/analyzer.py`)
+### 12.4 Stage 2b — Analyzer (`agents/analyzer.py`)
 
 **System prompt** (`prompts/analyzer_system.txt`):
 
@@ -703,9 +674,9 @@ Sources (chronological):
 Extract all business requirements from these sources.
 ```
 
-`complete_json()` schema = `AnalysisResult` with `RequirementDraft` items (no `id` field). Post-process: assign `BRD-{MODULE}-{NNN}` IDs.
+`complete_json()` schema = `AnalysisResult` with `RequirementDraft` items (no `id` field). Post-process: assign `BRD-{MODULE}-{NNN}` IDs per §7.5.
 
-### 11.5 Stage 3a — Generator (`agents/generator.py`)
+### 12.5 Stage 3a — Generator (`agents/generator.py`)
 
 **System prompt** (`prompts/generator_system.txt`):
 
@@ -738,114 +709,136 @@ Each narrative section must reference relevant modules and highlight version-spe
 
 Validate output as `BRDDocument`.
 
-### 11.6 Stage 3b — DocxRenderer (`services/docx_renderer.py`)
+### 12.6 Stage 3b — DocxRenderer (`services/docx_renderer.py`)
 
 1. Create blank Document.
 2. Add DRAFT watermark via header XML injection (not text box).
 3. For each structure section in order:
    - Heading 1/2/3 based on level.
-   - If section id = `requirements`: group by module, Heading 2 per module, Table per module.
+   - If section id = `requirements`: group by module, Heading 2 per module, Table per module (§9.3).
    - If narrative section: render paragraphs as Normal.
 4. Appendix: bullet list of source filenames.
 5. Save to `{folder}/output/{run_id}.docx`.
 
-### 11.7 LLMClient (`services/llm_client.py`)
+Named Word styles only — no inline fonts (visual branding clone is Milestone 6).
+
+### 12.7 LLMClient (`services/llm_client.py`)
 
 ```python
 class LLMClient:
-    async def complete(self, messages: list[dict], max_tokens: int = 4096) -> str: ...
-    async def complete_json(self, messages: list[dict], schema: type[BaseModel], max_tokens: int = 8192) -> dict: ...
+    def complete(self, messages: list[dict], max_tokens: int = 4096) -> str: ...
+    def complete_json(self, messages: list[dict], schema: type[BaseModel], max_tokens: int = 8192) -> dict: ...
 ```
 
-- 3 retries, exponential backoff from 2s.
-- Anthropic: `messages.create`; JSON via tool use or structured output.
-- OpenAI: `response_format={"type":"json_object"}`; prepend schema in system message.
-- Only file importing `anthropic` / `openai` SDKs.
+- 3 retries, exponential backoff from 2 s.
+- Anthropic: `messages.create`; JSON via tool use (the Pydantic schema becomes the tool's input schema).
+- On Pydantic validation failure: retry once with a "fix this JSON to match the schema" prompt, then fail the run.
+- Only file importing the `anthropic` SDK. Milestone 4 adds an `openai` branch behind the same two methods; Milestone 7 adds Ollama.
 
 ---
 
-## 12. UI Specification
+## 13. Electron Shell (Milestone 3 — target design, kept for the bigger picture)
 
-### 12.1 Navigation
+### 13.1 IPC contract (`electron/preload.js`)
+
+| Channel | Direction | Payload | Returns |
+|---------|-----------|---------|---------|
+| `api:call` | renderer → main | `{ method, path, body?, headers? }` | `{ status, data }` |
+| `api:stream` | renderer → main | `{ path }` | emits `api:stream:event` |
+| `storage:set` | renderer → main | `{ key, value }` | `boolean` |
+| `storage:get` | renderer → main | `{ key }` | `string \| null` |
+| `dialog:openFiles` | renderer → main | `{ filters?, multi? }` | `string[]` |
+| `dialog:openFolder` | renderer → main | `{}` | `string \| null` |
+| `dialog:saveFile` | renderer → main | `{ defaultPath, filters? }` | `string \| null` |
+
+The frontend's API layer is a single module (`src/api.js`); in browser mode it uses `fetch`/`EventSource`, in Electron mode the same module routes through `window.maximobrd` (the preload bridge). Pages and stores never know the difference.
+
+### 13.2 Process lifecycle
+
+Per §5.2: dynamic port, health-gate before window, SIGTERM→SIGKILL on quit, `BACKEND_DEV=1` to reuse an external uvicorn in development. Prod backend = PyInstaller binary in `resources/backend/` (no Torch in the MVP bundle).
+
+### 13.3 Key storage migration
+
+1. Renderer stores key via `storage:set` (safeStorage).
+2. Main process injects `X-API-Key` header on backend calls that need it (settings test, generate).
+3. Backend prefers the header; falls back to Keychain if present (one-time migration: on first Electron run, read Keychain → write safeStorage → delete Keychain entry).
+
+### 13.4 Packaging
+
+PyInstaller spec for the backend, electron-builder DMG, smoke test on a clean Mac. Internal distribution; no notarization yet.
+
+---
+
+## 14. UI Specification
+
+### 14.1 Navigation
 
 ```
-/                  → ProjectList
-/projects/:id      → ProjectDetail
-/projects/:id/generate → Generate (pipeline progress)
-/settings          → Settings
+/                       → ProjectList
+/projects/:id           → ProjectDetail
+/projects/:id/generate  → Generate (pipeline progress)
+/settings               → Settings
 ```
 
-No HTML `<form>` tags. React `onClick` / `onChange` only. No localStorage/sessionStorage.
+No HTML `<form>` tags (React `onClick`/`onChange` only). No localStorage/sessionStorage — server state lives in the backend; UI state in Zustand.
 
-### 12.2 ProjectList
+### 14.2 ProjectList
 
 - Table: client, project name, date, Maximo version, created.
-- "New Project" opens modal:
-  - client_name (required)
-  - project_name (required)
-  - project_date (date picker, default today)
-  - maximo_version (select; mas-8 disabled with tooltip)
-  - folder (dialog:openFolder; required)
-- Empty state: "Create your first project"
+- "New Project" modal: client_name (required), project_name (required), project_date (default today), maximo_version (select; `mas-8` disabled with tooltip), folder path (text input pre-filled with the default path; native folder picker arrives with Electron).
+- Empty state: "Create your first project".
 - First-run gate: if provider not configured, banner linking to Settings.
 
-### 12.3 ProjectDetail
-
-Sections:
+### 14.3 ProjectDetail
 
 1. **Project metadata** (read-only header).
-2. **Branded template** — upload DOCX; show extracted headings preview after upload.
-3. **Sources** — drag-drop zone + browse button:
-   - Columns: filename, size, effective date, status badge, actions (delete, edit date).
-   - Status badges: Extracting, Ready (EXTRACTED), Pending, Error (with tooltip).
-4. **Generate** button — disabled unless ≥1 EXTRACTED source AND provider configured.
-5. **Run history** — table of past runs with status, date, download button.
+2. **Sources** — drag-drop zone + browse button. Columns: filename, size, effective date, status badge, actions (delete, edit date). Badges: Extracting, Ready (EXTRACTED), Pending, Error (tooltip with message).
+3. **Generate** button — disabled unless ≥1 EXTRACTED source AND provider configured.
+4. **Run history** — past runs with status, date, download link.
+5. **Branded template** upload + heading preview — added in Milestone 2.
 
-### 12.4 Generate page
+### 14.4 Generate page
 
 - Progress bar (0–100) driven by SSE.
 - Stage checklist: Extraction → Analysis → Generation → Rendering.
 - Live message log (last 5 messages).
-- Cancel button → `POST /cancel`.
-- On `done`: "Save BRD" → `dialog:saveFile` copies output to user path.
-- On `error`: show message + "Return to project" + "Retry".
+- On `done`: "Download BRD" (browser download; native save dialog in Milestone 3).
+- On `error`: message + "Return to project" + "Retry".
+- Cancel button — Milestone 2.
 
-### 12.5 Settings
+### 14.5 Settings
 
-- Provider radio: Claude | OpenAI
-- Model text input with default suggestion
-- API key password field → `storage:set` on save
-- Test Connection button
-- Save button
+- Provider: Claude (only option shown in MVP; radio group ready for OpenAI/Ollama later).
+- Model text input with default suggestion.
+- API key password field → `POST /settings/api-key`; shown masked once configured.
+- Test Connection button; Save button.
 
 ---
 
-## 13. Configuration (`backend/config.py`)
+## 15. Configuration (`backend/config.py`)
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `MAXIMOBRD_PORT` | `8765` | Set by Electron in M3+; fixed in dev |
 | `TOKEN_THRESHOLD` | `12000` | Chars before summarization |
 | `MAX_UPLOAD_BYTES` | `524288000` | 500 MB |
 | `LLM_MAX_TOKENS_SUMMARIZE` | `4096` | |
 | `LLM_MAX_TOKENS_ANALYZE` | `8192` | |
 | `LLM_MAX_TOKENS_GENERATE` | `8192` | |
 | `APP_DATA_DIR` | OS-specific | `app.db` location |
-| `MAXIMOBRD_PORT` | dynamic | Set by Electron |
+| `PROJECTS_DEFAULT_DIR` | `~/MaximoBRD` | Default project folder root |
 
 ---
 
-## 14. Local Development Setup
+## 16. Local Development Setup
 
-### 14.1 Prerequisites
+### 16.1 Prerequisites
 
-- Node 20+, Python 3.11+, npm
+Node 20+, Python 3.11+, npm.
 
-### 14.2 First-time setup
+### 16.2 First-time setup
 
 ```bash
-# Root
-npm install
-
 # Backend
 cd backend
 python -m venv .venv
@@ -857,23 +850,20 @@ cd ../frontend
 npm install
 ```
 
-### 14.3 Run (three terminals)
+### 16.3 Run (two terminals)
 
 ```bash
 # Terminal 1 — Backend
 cd backend && source .venv/bin/activate
-MAXIMOBRD_PORT=8765 uvicorn main:app --reload --port 8765
+uvicorn main:app --reload --port 8765
 
-# Terminal 2 — Frontend
+# Terminal 2 — Frontend (Vite proxies /api → 8765)
 cd frontend && npm run dev
-
-# Terminal 3 — Electron
-cd electron && MAXIMOBRD_PORT=8765 BACKEND_DEV=1 npm run start
 ```
 
-`BACKEND_DEV=1` tells Electron not to spawn its own uvicorn (use existing dev server).
+Open `http://localhost:5173`. Single-command alternative once stable: `npm run build` in `frontend/`, then FastAPI serves `frontend/dist/` at `/` — one terminal, one URL.
 
-### 14.4 Root `package.json` scripts (target)
+### 16.4 Root `package.json` scripts (target)
 
 ```json
 {
@@ -886,181 +876,157 @@ cd electron && MAXIMOBRD_PORT=8765 BACKEND_DEV=1 npm run start
 }
 ```
 
----
-
-## 15. Testing Strategy
-
-### 15.1 Unit tests (pytest)
-
-| Module | Tests |
-|--------|-------|
-| `processors/pdf.py` | sample PDF → non-empty text |
-| `processors/docx.py` | paragraphs + tables |
-| `structure_extractor.py` | heading hierarchy order |
-| `docx_renderer.py` | tables exist, DRAFT header present, named styles only |
-| ID assignment | `BRD-WO-001` sequencing |
-| `llm_client.py` | retry logic (mocked) |
-
-### 15.2 Integration tests
-
-- Create project → upload TXT → wait EXTRACTED → generate (mock LLM) → DOCX file exists.
-- Malformed PDF → ERROR status + message.
-
-### 15.3 Manual E2E (Phase 1 exit criteria)
-
-1. Real Claude or OpenAI key configured.
-2. Upload 1 PDF + 1 DOCX.
-3. Generate BRD.
-4. Open DOCX in Word: headings correct, requirement tables present, DRAFT watermark visible, IDs formatted `BRD-*-NNN`.
+(`dev:electron` / `build:mac` activate in Milestone 3.)
 
 ---
 
-## 16. Phased Build Plan
+## 17. Testing Strategy
 
-### Phase 0 — Day 1 Spike (2 days)
+### 17.1 Unit tests (pytest)
 
-**Goal:** Prove Electron → IPC → FastAPI round trip.
+| Module | Tests | Milestone |
+|--------|-------|-----------|
+| `processors/pdf.py` | sample PDF → non-empty text | 1 |
+| `processors/docx.py` | paragraphs + tables | 1 |
+| ID assignment | `BRD-WO-001` sequencing | 1 |
+| `docx_renderer.py` | tables exist, DRAFT header present, named styles only | 1 |
+| `llm_client.py` | retry logic (mocked) | 2 |
+| `structure_extractor.py` | heading hierarchy order | 2 |
 
-- [ ] Scaffold all three packages
-- [ ] `/health` displayed in React
-- [ ] safeStorage round-trip test
-- [ ] Create prerequisite files: `brd_default_structure.json`, stub `maximo-76.md` + `mas-9.md` (expand content in parallel)
+### 17.2 Integration tests
 
-**Done when:** Window opens, health check green, IPC test button works.
+- Create project → upload TXT → wait EXTRACTED → generate (mock LLM) → DOCX file exists. (Milestone 2)
+- Malformed PDF → ERROR status + message. (Milestone 2)
 
----
+### 17.3 Manual E2E (Milestone 1 exit criteria)
 
-### Phase 1 — MVP (6–8 weeks)
-
-#### Week 1 — Scaffold + DB
-
-- [ ] IPC channels per §10
-- [ ] `app.db` + `project.db` engines, Alembic migrations
-- [ ] Project CRUD routes + ProjectList/Detail UI (no upload yet)
-
-#### Week 2 — Upload + Extraction
-
-- [ ] Streaming upload endpoint
-- [ ] All four text processors
-- [ ] Background extraction + status transitions
-- [ ] Source list UI with badges
-
-#### Week 3 — Settings + LLMClient
-
-- [ ] Provider settings routes
-- [ ] `LLMClient` with Claude + OpenAI
-- [ ] Settings page + test connection
-- [ ] API key via safeStorage + header injection
-
-#### Week 4–5 — Pipeline
-
-- [ ] `PipelineRun` model + generate/cancel/stream routes
-- [ ] All four agents + prompt files
-- [ ] Structure extractor + branded DOCX upload
-- [ ] Generate page with SSE progress
-
-#### Week 6 — DOCX + Export
-
-- [ ] `DocxRenderer` complete per §7.4
-- [ ] Download + save dialog flow
-- [ ] Run history on ProjectDetail
-
-#### Week 7 — Hardening
-
-- [ ] Error boundaries (React)
-- [ ] Structured API errors
-- [ ] Cancel pipeline
-- [ ] Filename collision + corrupt file handling
-
-#### Week 8 — Packaging
-
-- [ ] PyInstaller spec (no Torch)
-- [ ] electron-builder DMG
-- [ ] Smoke test on clean Mac
-
-**Phase 1 Definition of Done:**
-
-- [ ] All §15.3 manual E2E passes
-- [ ] Pending audio/video files upload without breaking generate
-- [ ] No API keys in logs or database
-- [ ] DMG installs and runs without dev tools
+1. Real Claude key configured via Settings.
+2. Upload 1 PDF + 1 DOCX (+ 1 MP3 to confirm PENDING doesn't break anything).
+3. Generate BRD; watch SSE progress.
+4. Open DOCX in Word: headings correct, requirement tables present, DRAFT watermark visible, IDs formatted `BRD-*-NNN`, source filenames cited.
+5. Confirm no API key appears in `app.db` or backend logs.
 
 ---
 
-### Phase 2 — Media + MAS 8 (3–4 weeks)
+## 18. Milestone Plan
 
-- [ ] Author `mas-8.md`
-- [ ] Enable `mas-8` in UI
-- [ ] `audio.py`, `video.py`, `image.py` processors
-- [ ] Whisper + ffmpeg bundling
-- [ ] `PENDING → TRANSCRIBING → EXTRACTED` flow
-- [ ] Vision API for images (text only sent to LLM)
+### Milestone 0 — Scaffold (1–2 days)
+
+- [ ] Repo scaffold: `backend/` (FastAPI + `/health`), `frontend/` (Vite + React + Tailwind + router shell)
+- [ ] React page fetches and displays `/health` through the Vite proxy
+- [ ] Create prerequisite artifacts: `brd_default_structure.json`, prompt files (§12), stub `maximo-76.md` + `mas-9.md`
+- [ ] `keyring` round-trip smoke test (write/read/delete a dummy value in Keychain)
+
+**Done when:** browser shows green health check; prompt/template/knowledge files exist.
+
+### Milestone 1 — Working MVP (~2 weeks)
+
+*Week 1 — data path:*
+
+- [ ] SQLite schema (§9.1) + `create_all` on startup
+- [ ] Project CRUD routes + ProjectList/ProjectDetail UI
+- [ ] Streaming upload endpoint + all four text processors + background extraction + status badges
+- [ ] Media files stored as PENDING; unknown types → ERROR
+
+*Week 2 — AI path:*
+
+- [ ] Settings routes + Keychain storage + Settings page + Test Connection
+- [ ] `LLMClient` (Anthropic) with retries + JSON-via-tool-use
+- [ ] Pipeline: pre-flight, 4 agents, ProgressBus, SSE stream, run row lifecycle
+- [ ] `DocxRenderer` per §12.6 + download endpoint + Generate page
+
+**Done when:** all of §17.3 passes — a real BRD from real documents, downloaded from the browser.
+
+### Milestone 2 — Hardening + spec completion (1–2 weeks)
+
+- [ ] Cancel pipeline (flag checked between stages) + Retry flow
+- [ ] Branded DOCX upload + `StructureExtractor` heading preview + use in pre-flight
+- [ ] Timestamp override UI; filename collision and corrupt-file handling verified
+- [ ] Structured API errors everywhere; React error boundaries
+- [ ] Unit + integration tests per §17.1–17.2; SSE replay for late connections
+- [ ] Optional: introduce Alembic before the schema is split in M3
+
+**Done when:** the app survives bad inputs gracefully and the test suite is green.
+
+### Milestone 3 — Desktop shell (1–2 weeks)
+
+- [ ] `electron/` package: main, preload, IPC per §13.1
+- [ ] `src/api.js` swaps to the IPC bridge under Electron; pages unchanged
+- [ ] safeStorage key migration (§13.3); native file/folder/save dialogs
+- [ ] Dynamic port + health gate + child-process lifecycle
+- [ ] Portable per-project `project.db` split (move `sources`/`pipeline_runs` rows into the project folder)
+- [ ] PyInstaller backend + electron-builder DMG; smoke test on a clean Mac
+
+**Done when:** DMG installs and the full §17.3 E2E passes inside the desktop app with no dev tools.
+
+### Milestone 4 — Second provider (2–4 days)
+
+- [ ] OpenAI branch in `LLMClient` (`response_format=json_object`, schema in system message)
+- [ ] Settings UI: provider radio + per-provider model defaults
+
+### Milestone 5 — Media + MAS 8 (3–4 weeks)
+
+- [ ] Author `mas-8.md`; enable `mas-8` in UI
+- [ ] `audio.py`, `video.py`, `image.py` processors; Whisper + ffmpeg bundling
+- [ ] `PENDING → TRANSCRIBING → EXTRACTED` flow; vision API for images (text only sent to LLM)
+
+### Milestone 6 — Branding clone (2–3 weeks)
+
+- [ ] `BrandingProfile` extraction + storage; renderer applies fonts/logo/table XML (best-effort)
+
+### Milestone 7 — Ollama (1–2 weeks)
+
+- [ ] `OllamaProvider` in `LLMClient`; model discovery endpoint + Settings UI
+
+### Milestone 8 — Windows + polish (2–3 weeks)
+
+- [ ] Windows electron-builder + PyInstaller; onboarding flow, accessibility pass, optional code signing
 
 ---
 
-### Phase 3 — Branding Clone (2–3 weeks)
-
-- [ ] `BrandingProfile` extraction + storage
-- [ ] Renderer applies fonts/logo/table XML (best-effort)
-
----
-
-### Phase 4 — Ollama (1–2 weeks)
-
-- [ ] `OllamaProvider` in `LLMClient`
-- [ ] Model discovery endpoint + Settings UI
-
----
-
-### Phase 5 — Windows + Polish (2–3 weeks)
-
-- [ ] Windows electron-builder + PyInstaller
-- [ ] Onboarding flow, accessibility pass
-- [ ] Optional code signing
-
----
-
-## 17. Risk Mitigations (Built-In)
+## 19. Risk Mitigations (Built-In)
 
 | Risk | Mitigation in this spec |
 |------|-------------------------|
+| MVP architecture becomes a dead end | Same backend/API/UI in browser and Electron; only key storage + dialogs swap (§13) |
 | Context overflow | Summarization at 12k chars; chronological source ordering |
-| LLM JSON drift | Pydantic validation; retry once with "fix JSON" prompt on failure |
-| Port conflict | Dynamic port + health gate |
+| LLM JSON drift | Tool-use JSON + Pydantic validation; one "fix JSON" retry |
+| Key leakage | Keychain (MVP) → safeStorage (M3); never in DB/logs; masked in UI |
 | Large uploads | Stream to disk; 500 MB cap |
-| Key leakage | safeStorage only; header injection; no logging |
-| READY vs EXTRACTED confusion | Single state machine in §6 |
+| Localhost backend exposed | Bind `127.0.0.1` only |
 | Redundant extraction | Sidecar cache in `extracted/`; Stage 1 reads cache |
+| Single-DB → portable-DB migration | All rows keyed by `project_id` from day one (§9.1) |
+| Port conflict (Electron) | Dynamic port + health gate (M3) |
+| Knowledge files thin at launch | Stubs unblock build; authoring is a tracked parallel task (§7.3) |
 
 ---
 
-## 18. Day-0 Artifact Checklist
-
-Create these files before or during Phase 0:
+## 20. Day-0 Artifact Checklist
 
 1. `docs/implementation-spec.md` (this file)
-2. `backend/templates/brd_default_structure.json` (§5.1)
-3. `knowledge/versions/maximo-76.md` (author content per §5.3)
-4. `knowledge/versions/mas-9.md` (author content per §5.3)
-5. `backend/prompts/*.txt` (§11.3–11.5 templates)
-6. `backend/models/pipeline.py` (§7.3)
+2. `backend/templates/brd_default_structure.json` (§7.1)
+3. `knowledge/versions/maximo-76.md` (stub now, author per §7.3)
+4. `knowledge/versions/mas-9.md` (stub now, author per §7.3)
+5. `backend/prompts/*.txt` (§12.3–12.5)
+6. `backend/models/pipeline.py` (§9.2)
 
 ---
 
-## 19. Document Relationship
+## 21. Document Relationship
 
 | Document | Role |
 |----------|------|
 | `docs/blueprint.md` | Product vision and constraints (reference only) |
-| `docs/plan.md` | Architectural rationale and stakeholder decisions (reference only) |
 | `docs/implementation-spec.md` | **Authoritative build specification** — use this to implement |
 
 ---
 
-## 20. Summary
+## 22. Summary
 
 | Question | Answer |
 |----------|--------|
-| Is this enough to implement? | **Yes**, for Phase 1 through packaging |
+| When is something working? | End of Milestone 1 (~2 weeks): real BRD from real documents, in the browser |
+| Does the MVP lock us in? | No — backend, API, schema, and UI carry into Electron unchanged; key storage and dialogs are the only swaps |
+| What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18 — nothing from the blueprint was dropped |
 | What's still judgment calls during build? | Visual polish, exact Tailwind styling, PyInstaller edge cases |
-| What's still content work? | Full Maximo knowledge files (structure defined, prose must be authored) |
+| What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored) |
