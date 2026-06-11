@@ -111,7 +111,7 @@ export default function ProjectList() {
       {loaded && !configured && (
         <div className="mb-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           No AI provider configured yet —{' '}
-          <Link to="/settings" className="font-medium underline">open Settings</Link> to add your Claude API key.
+          <Link to="/settings" className="font-medium underline">open Settings</Link> to add your API key.
         </div>
       )}
 

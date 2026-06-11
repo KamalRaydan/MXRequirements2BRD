@@ -13,7 +13,7 @@ from services import keystore
 class FakeLLM:
     """Stands in for LLMClient — returns canned, schema-valid responses."""
 
-    def __init__(self, api_key, model_id):
+    def __init__(self, api_key, model_id, provider="anthropic"):
         pass
 
     def complete(self, messages, max_tokens=4096, system=None):
@@ -40,7 +40,7 @@ class FakeLLM:
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(agents.runner, "LLMClient", FakeLLM)
-    monkeypatch.setattr(keystore, "get_api_key", lambda: "test-key")
+    monkeypatch.setattr(keystore, "get_api_key", lambda provider: "test-key")
     with TestClient(main.app) as test_client:
         yield test_client
 

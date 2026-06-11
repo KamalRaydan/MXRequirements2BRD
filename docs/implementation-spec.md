@@ -48,8 +48,8 @@ The previous revision of this spec front-loaded Electron, dual AI providers, and
 | Topic | MVP decision |
 |-------|--------------|
 | Shell | Browser at `http://127.0.0.1:8765` — no Electron yet |
-| AI provider | **Anthropic Claude only** (`claude-sonnet-4-6` default) |
-| API key storage | macOS Keychain via Python `keyring` — never in DB, logs, code, or `.env` |
+| AI provider | **Anthropic Claude** (`claude-sonnet-4-6` default) + **OpenAI** (`gpt-4o` default) — user-selectable (Milestone 4 pulled forward) |
+| API key storage | macOS Keychain via Python `keyring`, **one entry per provider** — never in DB, logs, code, or `.env` |
 | Database | **One SQLite file** `app.db` in OS app-data dir (projects + sources + runs + settings) |
 | Migrations | None yet — `SQLAlchemy create_all()` at startup |
 | Project files | Per-project folder, default `~/MaximoBRD/{client}-{project}` (path editable as text) |
@@ -71,7 +71,6 @@ The previous revision of this spec front-loaded Electron, dual AI providers, and
 | API keys in Electron `safeStorage` (migrated from Keychain) | Per §13.3 | Milestone 3 |
 | Portable per-project `project.db` | Split rows out of `app.db` by `project_id` (schema already keyed for it) | Milestone 3 (with Electron packaging) |
 | Branded DOCX → heading-structure extraction | `StructureExtractor` | Milestone 2 |
-| OpenAI as second provider | Same `LLMClient` interface | Milestone 4 |
 | Audio/video/image processing (Whisper, ffmpeg, vision) | `PENDING → TRANSCRIBING → EXTRACTED` | Milestone 5 |
 | MAS 8.x knowledge + enablement | `mas-8.md` | Milestone 5 |
 | Visual branding clone (fonts/logo/tables) | `BrandingProfile` | Milestone 6 |
@@ -85,9 +84,9 @@ The previous revision of this spec front-loaded Electron, dual AI providers, and
 
 **A consultant can:** create a project → upload PDF/DOCX/TXT/MD/XLSX files → click Generate → watch live progress → download a DRAFT-watermarked DOCX BRD with `BRD-{MODULE}-{NNN}` requirement tables citing source filenames.
 
-**Explicitly in:** project CRUD, streaming upload, background text extraction with status badges, Claude settings + Keychain key + test connection, 3-stage pipeline with SSE progress, summarization fallback for oversized sources, DOCX render + download, media files accepted as `PENDING` without breaking generation.
+**Explicitly in:** project CRUD, streaming upload, background text extraction with status badges, provider settings (Claude or OpenAI) + per-provider Keychain keys + test connection, 3-stage pipeline with SSE progress, summarization fallback for oversized sources, DOCX render + download, media files accepted as `PENDING` without breaking generation.
 
-**Explicitly out (per §3.2):** Electron, branding, OpenAI, cancel mid-run (Milestone 2), run-history polish, media processing, packaging.
+**Explicitly out (per §3.2):** Electron, branding, cancel mid-run (Milestone 2), run-history polish, media processing, packaging.
 
 ---
 
@@ -101,7 +100,7 @@ Browser (React + Vite + Tailwind + Zustand)
    ▼
 FastAPI @ 127.0.0.1:8765
   ├── routes/       REST + SSE
-  ├── services/     LLMClient (Anthropic), DocxRenderer, ProgressBus
+  ├── services/     LLMClient (Anthropic + OpenAI), DocxRenderer, ProgressBus
   ├── agents/       extractor, summarizer, analyzer, generator (sequential)
   ├── processors/   per file-type text extraction
   ├── models/       Pydantic inter-stage contracts
@@ -275,13 +274,14 @@ Each `knowledge/versions/*.md` must include these H2 sections — content is inj
 
 Stubs are acceptable for Milestone 0–1 bring-up; full prose is a parallel content task that must be done before real client use.
 
-### 7.4 Default AI model
+### 7.4 AI providers and default models
 
-| Provider | Default `model_id` | Settings placeholder |
-|----------|-------------------|----------------------|
-| `anthropic` | `claude-sonnet-4-6` | Claude Sonnet 4.6 |
+| Provider | Default `model_id` | Models docs link (shown in Settings) |
+|----------|-------------------|--------------------------------------|
+| `anthropic` | `claude-sonnet-4-6` | https://platform.claude.com/docs/en/about-claude/models/overview |
+| `openai` | `gpt-4o` | https://platform.openai.com/docs/models |
 
-(`openai` / `gpt-4o` row returns in Milestone 4.)
+The model field is free text — users can enter any model name their provider offers; the Settings page links to each provider's model list. Provider metadata (label, default model, docs URL) lives in `backend/config.py` `PROVIDERS` and is served to the UI by `GET /settings/provider`, so adding a provider is a backend-only change.
 
 ### 7.5 Maximo module codes (for `BRD-{MODULE}-{NNN}`)
 
@@ -554,13 +554,28 @@ Response `201`:
 
 ### 10.4 Settings
 
-MVP key flow (no Electron yet): the key passes through one POST over localhost, is written straight to the macOS Keychain, and is never persisted or logged anywhere else.
+MVP key flow (no Electron yet): keys pass through one POST over localhost, are written straight to the macOS Keychain (one entry per provider, account `api_key_{provider}`), and are never persisted or logged anywhere else.
 
-- `GET /settings/provider` → `200` `{ "provider": "anthropic", "model_id": "claude-sonnet-4-6", "configured": true }` (`configured` = key exists in Keychain).
-- `POST /settings/provider` → `{ "provider": "anthropic", "model_id": "claude-sonnet-4-6" }`.
-- `POST /settings/api-key` → `{ "api_key": "sk-ant-..." }` → stored via `keyring`; response `{ "success": true }`. Key is masked in the UI after save.
-- `DELETE /settings/api-key` → removes from Keychain.
-- `POST /settings/provider/test` → reads key from Keychain, makes a minimal completion ("Reply OK") → `{ "success": true, "latency_ms": 842 }`.
+- `GET /settings/provider` → `200`
+
+```json
+{
+  "provider": "anthropic",
+  "model_id": "claude-sonnet-4-6",
+  "configured": true,
+  "providers": [
+    { "key": "anthropic", "label": "Anthropic Claude", "default_model": "claude-sonnet-4-6",
+      "models_url": "https://platform.claude.com/docs/en/about-claude/models/overview", "configured": true },
+    { "key": "openai", "label": "OpenAI", "default_model": "gpt-4o",
+      "models_url": "https://platform.openai.com/docs/models", "configured": false }
+  ]
+}
+```
+
+- `POST /settings/provider` → `{ "provider": "openai", "model_id": "gpt-4o" }` (blank `model_id` falls back to the provider default).
+- `POST /settings/api-key` → `{ "provider": "anthropic", "api_key": "sk-ant-..." }` → stored via `keyring`; response `{ "success": true }`. Key is masked in the UI after save.
+- `DELETE /settings/api-key/{provider}` → removes that provider's key from the Keychain.
+- `POST /settings/provider/test` → body `{ "provider"?, "model_id"?, "api_key"? }` — all optional. Tests **what the Settings form currently shows**: the given provider/model (falling back to saved settings), and the given key (falling back to that provider's Keychain entry; a typed key is tested without being stored). Makes a minimal completion ("Reply OK") → `{ "success": true, "latency_ms": 842 }`.
 
 From Milestone 3 this migrates to the safeStorage + `X-API-Key` header-injection design in §13.3.
 
@@ -749,16 +764,17 @@ Named Word styles only — no inline fonts (visual branding clone is Milestone 6
 
 ```python
 class LLMClient:
-    def __init__(self, api_key: str, model_id: str): ...
+    def __init__(self, api_key: str, model_id: str, provider: str = "anthropic"): ...
     def complete(self, messages: list[dict], max_tokens: int = 4096, system: str | None = None) -> str: ...
     def complete_json(self, messages: list[dict], schema: type[BaseModel], max_tokens: int = 8192, system: str | None = None) -> BaseModel: ...
 ```
 
-- 3 retries, exponential backoff from 2 s.
+- 3 retries, exponential backoff from 2 s — shared across providers (both SDKs raise identically named exception classes).
 - Anthropic: `messages.create`; JSON via tool use (the Pydantic schema becomes the tool's `input_schema`; `tool_choice` forces the model to call it).
+- OpenAI: `chat.completions.create`; JSON via `response_format={"type": "json_object"}` with the schema embedded in the system message.
 - `complete_json()` returns the validated `BaseModel` instance directly (not a raw `dict`).
 - On Pydantic validation failure: retry once with a "fix this JSON to match the schema" prompt, then raise `LLMError`.
-- Only file importing the `anthropic` SDK. Milestone 4 adds an `openai` branch behind the same two methods; Milestone 7 adds Ollama.
+- Only file importing the `anthropic` / `openai` SDKs. Milestone 7 adds Ollama behind the same two methods.
 
 ---
 
@@ -833,10 +849,10 @@ No HTML `<form>` tags (React `onClick`/`onChange` only). No localStorage/session
 
 ### 14.5 Settings
 
-- Provider: Claude (only option shown in MVP; radio group ready for OpenAI/Ollama later).
-- Model text input with default suggestion.
-- API key password field → `POST /settings/api-key`; shown masked once configured.
-- Test Connection button; Save button.
+- Provider radio: Anthropic Claude | OpenAI (rendered from `GET /settings/provider` → `providers`, so Ollama appears automatically in Milestone 7). A "key saved" badge shows per provider.
+- Model: free-text input pre-filled with the provider default, with a hyperlink to that provider's model-list docs page (`models_url`).
+- API key password field per provider → `POST /settings/api-key`; shown masked once configured; each provider keeps its own Keychain entry.
+- Test Connection button (tests the saved provider/model); Save button.
 
 ---
 
@@ -986,10 +1002,11 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 
 **Done when:** DMG installs and the full §17.3 E2E passes inside the desktop app with no dev tools.
 
-### Milestone 4 — Second provider (2–4 days)
+### Milestone 4 — Second provider ✅ (pulled forward, completed with Milestone 1)
 
-- [ ] OpenAI branch in `LLMClient` (`response_format=json_object`, schema in system message)
-- [ ] Settings UI: provider radio + per-provider model defaults
+- [x] OpenAI branch in `LLMClient` (`response_format=json_object`, schema in system message)
+- [x] Settings UI: provider radio + per-provider model defaults + model-docs hyperlinks
+- [x] Per-provider API keys in the Keychain (`api_key_anthropic`, `api_key_openai`)
 
 ### Milestone 5 — Media + MAS 8 (3–4 weeks)
 

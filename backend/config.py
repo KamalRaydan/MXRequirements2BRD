@@ -46,6 +46,21 @@ MODULE_CODES = [
     "RFQ", "REORDER", "GL", "ESCALATION", "KPI", "MOBILE", "INTEGRATION", "GENERAL",
 ]
 
-# API key location in the macOS Keychain (MVP; Electron safeStorage in Milestone 3)
+# Supported AI providers. models_url is shown in Settings so users can look up model names.
+PROVIDERS = {
+    "anthropic": {
+        "label": "Anthropic Claude",
+        "default_model": "claude-sonnet-4-6",
+        "models_url": "https://platform.claude.com/docs/en/about-claude/models/overview",
+    },
+    "openai": {
+        "label": "OpenAI",
+        "default_model": "gpt-4o",
+        "models_url": "https://platform.openai.com/docs/models",
+    },
+}
+
+# API key location in the macOS Keychain (MVP; Electron safeStorage in Milestone 3).
+# One Keychain entry per provider: account name is "api_key_{provider}".
 KEYRING_SERVICE = "maximobrd"
-KEYRING_ACCOUNT = "api_key"
+KEYRING_LEGACY_ACCOUNT = "api_key"  # pre-multi-provider entry, read as anthropic

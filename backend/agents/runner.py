@@ -32,7 +32,8 @@ def _load_knowledge(maximo_version: str) -> tuple[str, str]:
     return label, (config.KNOWLEDGE_DIR / filename).read_text(encoding="utf-8")
 
 
-def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str) -> None:
+def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str,
+                 provider: str = "anthropic") -> None:
     db = SessionLocal()
     try:
         run = db.get(PipelineRun, run_id)
@@ -41,7 +42,7 @@ def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str) -> N
         # ---- Pre-flight (spec §12.1) ----
         version_label, knowledge = _load_knowledge(project.maximo_version)
         structure = _load_structure()
-        llm = LLMClient(api_key=api_key, model_id=model_id)
+        llm = LLMClient(api_key=api_key, model_id=model_id, provider=provider)
 
         sources = (
             db.query(Source)

@@ -26,7 +26,12 @@ def generate(project_id: str, background_tasks: BackgroundTasks, db: Session = D
     if not project:
         raise api_error(404, "NOT_FOUND", "Project not found")
 
-    api_key = keystore.get_api_key()
+    from db.models import ProviderSettings
+    settings = db.get(ProviderSettings, 1)
+    provider = settings.provider if settings else "anthropic"
+    model_id = settings.model_id if settings else "claude-sonnet-4-6"
+
+    api_key = keystore.get_api_key(provider)
     if not api_key:
         raise api_error(400, "NO_KEY", "Configure your AI provider in Settings first")
 
@@ -38,16 +43,12 @@ def generate(project_id: str, background_tasks: BackgroundTasks, db: Session = D
     if extracted_count == 0:
         raise api_error(400, "NO_SOURCES", "At least one source must finish extraction before generating")
 
-    from db.models import ProviderSettings
-    settings = db.get(ProviderSettings, 1)
-    model_id = settings.model_id if settings else "claude-sonnet-4-6"
-
     run = PipelineRun(project_id=project_id, status="RUNNING")
     db.add(run)
     db.commit()
 
     bus.start_run(run.id)
-    background_tasks.add_task(run_pipeline, run.id, project_id, api_key, model_id)
+    background_tasks.add_task(run_pipeline, run.id, project_id, api_key, model_id, provider)
     return {"run_id": run.id, "status": "RUNNING"}
 
 

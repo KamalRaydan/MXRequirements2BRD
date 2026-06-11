@@ -42,7 +42,7 @@
 
 ## MVP-first scope (Milestones 0–1)
 - Build the browser app at `http://127.0.0.1:8765` first. **No Electron** until Milestone 3.
-- **Anthropic Claude only** (`claude-sonnet-4-6` default). No OpenAI, Ollama, or second providers until their milestone.
+- **Anthropic Claude** (`claude-sonnet-4-6` default) **+ OpenAI** (`gpt-4o` default) — Milestone 4 pulled forward. No Ollama or other providers until their milestone. Provider metadata lives in `config.PROVIDERS`.
 - Do not add deferred features (media processing, branded templates, cancel mid-run, Alembic, Windows packaging) unless explicitly working that milestone.
 - Follow the repo layout in spec §6: `frontend/`, `backend/`, `knowledge/versions/`, `electron/` (empty until M3).
 
@@ -50,7 +50,7 @@
 - **Backend:** FastAPI + **sync** SQLAlchemy + SQLite (`app.db` in OS app-data dir). Use `def` route handlers and `create_all()` at startup — no async DB driver, no Alembic yet.
 - **Pipeline:** FastAPI `BackgroundTask` → sequential agents (extractor → summarizer → analyzer → generator) → `ProgressBus` → **SSE only** (no client polling).
 - **Frontend:** React + Vite + Tailwind + Zustand. Vite dev proxy `/api` → backend. No `localStorage`/`sessionStorage`; no HTML `<form>` tags.
-- **LLM:** All AI calls go through `backend/services/llm_client.py`. Only that file imports the `anthropic` SDK. JSON via tool-use + Pydantic validation; one "fix JSON" retry on schema failure.
+- **LLM:** All AI calls go through `backend/services/llm_client.py`. Only that file imports the `anthropic`/`openai` SDKs. JSON via tool-use (Anthropic) or `response_format=json_object` + schema-in-system (OpenAI) + Pydantic validation; one "fix JSON" retry on schema failure.
 - **Summarization:** When source `char_count > TOKEN_THRESHOLD` (12 000), run summarizer before analysis.
 
 ## Security & data

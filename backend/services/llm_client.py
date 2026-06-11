@@ -1,15 +1,34 @@
-"""All LLM calls go through here. Only this file imports the `anthropic` SDK (spec §12.7).
+"""All LLM calls go through here. Only this file imports the `anthropic` and
+`openai` SDKs (spec §12.7).
 
 - complete():      plain text completion
-- complete_json(): structured JSON via tool-use, validated against a Pydantic schema,
-                   with one "fix this JSON" retry on validation failure
-- 3 transport retries with exponential backoff starting at 2s
+- complete_json(): structured JSON validated against a Pydantic schema, with one
+                   "fix this JSON" retry on validation failure.
+                   Anthropic: forced tool-use carrying the schema.
+                   OpenAI: response_format=json_object + schema in the system message.
+- 3 transport retries with exponential backoff starting at 2s (both providers)
 """
 import json
 import time
 
 import anthropic
+import openai
 from pydantic import BaseModel, ValidationError
+
+# Both SDKs use the same exception class names, so retry handling is shared
+_TRANSIENT_ERRORS = (
+    anthropic.APIConnectionError, anthropic.InternalServerError,
+    openai.APIConnectionError, openai.InternalServerError,
+)
+_RATE_LIMIT_ERRORS = (anthropic.RateLimitError, openai.RateLimitError)
+_AUTH_ERRORS = (anthropic.AuthenticationError, openai.AuthenticationError)
+_STATUS_ERRORS = (anthropic.APIStatusError, openai.APIStatusError)
+
+# Where to fix billing/credit problems, per provider
+_BILLING_HINTS = {
+    "openai": "platform.openai.com → Settings → Billing (API credits are separate from ChatGPT Plus)",
+    "anthropic": "console.anthropic.com → Billing",
+}
 
 
 class LLMError(Exception):
@@ -20,35 +39,68 @@ class LLMClient:
     MAX_RETRIES = 3
     BACKOFF_START_SECONDS = 2
 
-    def __init__(self, api_key: str, model_id: str):
-        self._client = anthropic.Anthropic(api_key=api_key)
+    def __init__(self, api_key: str, model_id: str, provider: str = "anthropic"):
+        self.provider = provider
         self.model_id = model_id
+        if provider == "anthropic":
+            self._anthropic = anthropic.Anthropic(api_key=api_key)
+        elif provider == "openai":
+            self._openai = openai.OpenAI(api_key=api_key)
+        else:
+            raise LLMError(f"Unknown AI provider '{provider}'")
 
-    def _create(self, **kwargs):
-        """messages.create with retry/backoff on transient errors."""
+    # ---- shared retry wrapper ----
+
+    def _with_retries(self, request_fn):
         delay = self.BACKOFF_START_SECONDS
         last_error: Exception | None = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                return self._client.messages.create(model=self.model_id, **kwargs)
-            except (anthropic.APIConnectionError, anthropic.RateLimitError,
-                    anthropic.InternalServerError) as e:
+                return request_fn()
+            except _AUTH_ERRORS:
+                raise LLMError("API key was rejected by the provider — check Settings.")
+            except _RATE_LIMIT_ERRORS as e:
+                # OpenAI reports "no credits on the account" as a 429 too —
+                # that's a billing problem, not a rate problem; never retry it
+                if "insufficient_quota" in str(e):
+                    raise LLMError(
+                        "Your account has no available API credits (insufficient_quota). "
+                        f"Add credits at {_BILLING_HINTS.get(self.provider, 'your provider billing page')}."
+                    )
                 last_error = e
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(delay)
                     delay *= 2
-            except anthropic.AuthenticationError:
-                raise LLMError("API key was rejected by Anthropic — check Settings.")
-            except anthropic.APIStatusError as e:
+            except _TRANSIENT_ERRORS as e:
+                last_error = e
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(delay)
+                    delay *= 2
+            except _STATUS_ERRORS as e:
                 raise LLMError(f"AI provider error (HTTP {e.status_code}).")
+
+        if isinstance(last_error, _RATE_LIMIT_ERRORS):
+            raise LLMError(f"Rate limited by the AI provider after {self.MAX_RETRIES} attempts — "
+                           "wait a minute and try again.")
         raise LLMError(f"AI provider unreachable after {self.MAX_RETRIES} attempts: {type(last_error).__name__}")
 
+    # ---- plain text ----
+
     def complete(self, messages: list[dict], max_tokens: int = 4096, system: str | None = None) -> str:
-        kwargs: dict = {"messages": messages, "max_tokens": max_tokens}
-        if system:
-            kwargs["system"] = system
-        response = self._create(**kwargs)
-        return "".join(block.text for block in response.content if block.type == "text")
+        if self.provider == "anthropic":
+            kwargs: dict = {"model": self.model_id, "messages": messages, "max_tokens": max_tokens}
+            if system:
+                kwargs["system"] = system
+            response = self._with_retries(lambda: self._anthropic.messages.create(**kwargs))
+            return "".join(block.text for block in response.content if block.type == "text")
+
+        oa_messages = ([{"role": "system", "content": system}] if system else []) + messages
+        response = self._with_retries(lambda: self._openai.chat.completions.create(
+            model=self.model_id, messages=oa_messages, max_completion_tokens=max_tokens,
+        ))
+        return response.choices[0].message.content or ""
+
+    # ---- structured JSON ----
 
     def complete_json(
         self,
@@ -57,24 +109,7 @@ class LLMClient:
         max_tokens: int = 8192,
         system: str | None = None,
     ) -> BaseModel:
-        """Force JSON output by exposing the Pydantic schema as a tool the model must call."""
-        tool = {
-            "name": "submit_result",
-            "description": "Submit the structured result matching the required schema.",
-            "input_schema": schema.model_json_schema(),
-        }
-        kwargs: dict = {
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "tools": [tool],
-            "tool_choice": {"type": "tool", "name": "submit_result"},
-        }
-        if system:
-            kwargs["system"] = system
-
-        response = self._create(**kwargs)
-        raw = self._tool_input(response)
-
+        raw = self._json_request(messages, schema, max_tokens, system)
         try:
             return schema.model_validate(raw)
         except ValidationError as first_error:
@@ -85,21 +120,55 @@ class LLMClient:
                     "role": "user",
                     "content": (
                         "That JSON failed schema validation with these errors:\n"
-                        f"{first_error}\n\nCall submit_result again with corrected JSON."
+                        f"{first_error}\n\nReturn corrected JSON matching the schema."
                     ),
                 },
             ]
-            kwargs["messages"] = repair_messages
-            response = self._create(**kwargs)
-            raw = self._tool_input(response)
+            raw = self._json_request(repair_messages, schema, max_tokens, system)
             try:
                 return schema.model_validate(raw)
             except ValidationError:
                 raise LLMError("AI output failed validation twice — try Generate again.")
 
-    @staticmethod
-    def _tool_input(response) -> dict:
-        for block in response.content:
-            if block.type == "tool_use":
-                return block.input
-        raise LLMError("AI response contained no structured output.")
+    def _json_request(self, messages, schema, max_tokens, system) -> dict:
+        """One JSON-producing call, provider-specific."""
+        if self.provider == "anthropic":
+            # Force JSON by exposing the schema as a tool the model must call
+            tool = {
+                "name": "submit_result",
+                "description": "Submit the structured result matching the required schema.",
+                "input_schema": schema.model_json_schema(),
+            }
+            kwargs: dict = {
+                "model": self.model_id,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "tools": [tool],
+                "tool_choice": {"type": "tool", "name": "submit_result"},
+            }
+            if system:
+                kwargs["system"] = system
+            response = self._with_retries(lambda: self._anthropic.messages.create(**kwargs))
+            for block in response.content:
+                if block.type == "tool_use":
+                    return block.input
+            raise LLMError("AI response contained no structured output.")
+
+        # OpenAI: JSON mode + schema embedded in the system message (spec §12.7)
+        json_system = (
+            (system + "\n\n" if system else "")
+            + "Respond with a single JSON object that matches this JSON schema exactly:\n"
+            + json.dumps(schema.model_json_schema())
+        )
+        oa_messages = [{"role": "system", "content": json_system}] + messages
+        response = self._with_retries(lambda: self._openai.chat.completions.create(
+            model=self.model_id,
+            messages=oa_messages,
+            max_completion_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        ))
+        content = response.choices[0].message.content or ""
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            raise LLMError("AI response was not valid JSON.")
