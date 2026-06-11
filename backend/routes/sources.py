@@ -127,8 +127,9 @@ async def upload_source(
 def refresh_source_dates(project_id: str, db: Session = Depends(get_db)):
     """Re-read embedded metadata dates for every source already on disk.
 
-    Backfill for files uploaded before metadata extraction existed. Manual
-    overrides are left alone — effective_timestamp still prefers them.
+    The user is explicitly asking for the files' real dates, so where one is
+    found it also replaces any manual override. Files without embedded dates
+    (plain text, media) keep their current date and override.
     """
     project = db.get(Project, project_id)
     if not project:
@@ -144,6 +145,7 @@ def refresh_source_dates(project_id: str, db: Session = Depends(get_db)):
         found = processors.embedded_date(source.filetype, source.filepath)
         if found:
             source.source_timestamp = found
+            source.user_timestamp_override = None
     db.commit()
     return sources
 

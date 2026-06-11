@@ -246,8 +246,8 @@ def test_upload_uses_embedded_document_date(client, tmp_path):
 
 
 def test_refresh_dates_backfills_existing_sources(client, tmp_path):
-    """refresh-dates re-reads embedded dates from files already on disk and
-    leaves manual overrides untouched."""
+    """refresh-dates re-reads embedded dates from files already on disk; where
+    a date is found it replaces any manual override too."""
     import io
     from datetime import datetime, timezone
 
@@ -280,13 +280,28 @@ def test_refresh_dates_backfills_existing_sources(client, tmp_path):
     refreshed = client.post(f"/projects/{project['id']}/sources/refresh-dates").json()
     assert refreshed[0]["source_timestamp"].startswith("2026-02-01T10:00:00")
 
-    # A manual override set by the user survives a refresh
+    # A manual override is wiped when the file yields a real date — the whole
+    # point of the button is restoring the files' actual dates
     client.patch(
         f"/projects/{project['id']}/sources/{source_id}",
         json={"user_timestamp_override": "2026-03-05T09:00:00Z"},
     )
     refreshed = client.post(f"/projects/{project['id']}/sources/refresh-dates").json()
-    assert refreshed[0]["user_timestamp_override"].startswith("2026-03-05T09:00:00")
+    assert refreshed[0]["user_timestamp_override"] is None
+    assert refreshed[0]["source_timestamp"].startswith("2026-02-01T10:00:00")
+
+    # A plain-text source has no embedded date, so its override is kept
+    txt_id = client.post(
+        f"/projects/{project['id']}/sources/upload",
+        files={"file": ("notes.txt", b"plain notes", "text/plain")},
+    ).json()["id"]
+    client.patch(
+        f"/projects/{project['id']}/sources/{txt_id}",
+        json={"user_timestamp_override": "2026-04-01T12:00:00Z"},
+    )
+    refreshed = client.post(f"/projects/{project['id']}/sources/refresh-dates").json()
+    txt_source = next(s for s in refreshed if s["id"] == txt_id)
+    assert txt_source["user_timestamp_override"].startswith("2026-04-01T12:00:00")
 
 
 def test_validation_errors_use_the_error_envelope(client):

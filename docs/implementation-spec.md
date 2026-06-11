@@ -559,7 +559,7 @@ Response `201`:
 - `GET /projects/{id}/sources` → `200` array (UI refreshes this after upload and while badges show `EXTRACTING`-at-upload-time only; no pipeline polling).
 - `DELETE /projects/{id}/sources/{source_id}` → `204` (file + sidecar + row).
 - `PATCH /projects/{id}/sources/{source_id}` → `{ "user_timestamp_override": "2026-05-10T14:00:00Z" }`.
-- `POST /projects/{id}/sources/refresh-dates` → `200` refreshed source array — re-reads each file's embedded metadata date from disk and updates `source_timestamp` where one is found (backfill for sources uploaded before date extraction existed; manual overrides are untouched). UI exposes this as "Re-read dates from files" under the sources table.
+- `POST /projects/{id}/sources/refresh-dates` → `200` refreshed source array — re-reads each file's embedded metadata date from disk; where one is found it updates `source_timestamp` **and clears any `user_timestamp_override`** (the user is explicitly asking for the files' real dates). Sources without an embedded date (plain text, media) keep their current date and override. UI exposes this as "Re-read dates from files" under the sources table.
 
 ### 10.4 Settings
 
