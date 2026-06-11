@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+
+API keys are stored exclusively via Electron safeStorage.
+Never write API keys to .env files, log files, or plaintext storage.
+Never log API key values anywhere in the codebase.
+
+Never send raw audio, video, or binary file content to any AI provider API.
+Only send extracted text.
+
+Never expose the production database connection string in any config file
+committed to version control.

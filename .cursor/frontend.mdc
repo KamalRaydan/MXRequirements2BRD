@@ -1,0 +1,12 @@
+---
+alwaysApply: true
+---
+
+Never use localStorage or sessionStorage in any React component or artifact.
+Use Zustand for all client-side state.
+
+Never use HTML form tags. Use React onClick and onChange handlers instead.
+
+All communication between the Electron main process and the React frontend
+must go through channels defined in electron/preload.js.
+Never use require() or Node APIs directly in renderer process code.

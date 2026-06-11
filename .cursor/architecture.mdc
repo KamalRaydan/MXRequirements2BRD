@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+
+Always use LLMClient (backend/services/llm_client.py) for all AI calls.
+Never import anthropic, openai, or ollama SDKs directly in agent files.
+
+Agents run sequentially. Never introduce parallel or concurrent agent execution.
+
+All pipeline progress must be communicated to the frontend via SSE.
+Never use polling as an alternative.
+
+FastAPI route handlers must be async. No synchronous blocking calls in route handlers.

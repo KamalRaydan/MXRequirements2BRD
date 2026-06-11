@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+
+The Maximo version selected by the user must always be loaded from
+knowledge/versions/ at pipeline runtime and injected into the
+Domain Agent system prompt dynamically.
+
+Never hardcode Maximo version assumptions in any agent prompt.
+Version-specific behaviour lives in knowledge files, not in code.

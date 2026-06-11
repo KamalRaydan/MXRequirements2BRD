@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+
+Always use named Word styles (Heading 1, Heading 2, Heading 3, Normal)
+when building documents via python-docx.
+Never hardcode font names or sizes inline on paragraph runs.
+
+Requirements must always be rendered as python-docx Table objects.
+Never render requirements as plain text lists.
+
+Requirement IDs must follow the format BRD-{MODULE}-{NNN}
+(e.g., BRD-WO-001, BRD-INV-003).
+
+The DRAFT watermark must be implemented via XML injection into the
+document header. Never use a text box or shape overlay.
