@@ -2,12 +2,13 @@
 alwaysApply: true
 ---
 
-API keys are stored exclusively via Electron safeStorage.
-Never write API keys to .env files, log files, or plaintext storage.
+MVP (Milestones 0–1): API keys stored exclusively via macOS Keychain (`keyring`).
+Milestone 3 migrates to Electron `safeStorage`.
+
+Never write API keys to `.env`, log files, SQLite, or plaintext storage.
 Never log API key values anywhere in the codebase.
 
 Never send raw audio, video, or binary file content to any AI provider API.
 Only send extracted text.
 
-Never expose the production database connection string in any config file
-committed to version control.
+Never expose database paths or connection strings with secrets in version control.

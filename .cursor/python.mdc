@@ -2,13 +2,13 @@
 alwaysApply: true
 ---
 
-All data passed between pipeline stages must use Pydantic models
-defined in backend/models/.
+All data passed between pipeline stages must use Pydantic models in `backend/models/`.
 
 All functions must have type hints on parameters and return values.
 
-All LLM API calls must implement retry logic: 3 attempts,
-exponential backoff starting at 2 seconds.
+All LLM API calls (via LLMClient) must retry 3 times with exponential backoff from 2 seconds.
+On Pydantic validation failure after `complete_json()`, retry once with a fix-JSON prompt, then fail the run.
 
-File processing functions must handle missing files, corrupt files,
-and unsupported formats gracefully with descriptive error messages.
+Use sync SQLAlchemy sessions. Schema via `create_all()` at startup — no Alembic until Milestone 2–3.
+
+File processing must handle missing, corrupt, and unsupported files gracefully with descriptive errors.

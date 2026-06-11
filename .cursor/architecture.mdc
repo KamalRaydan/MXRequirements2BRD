@@ -2,12 +2,17 @@
 alwaysApply: true
 ---
 
-Always use LLMClient (backend/services/llm_client.py) for all AI calls.
-Never import anthropic, openai, or ollama SDKs directly in agent files.
+Authoritative build spec: `docs/implementation-spec.md`.
+
+MVP (Milestones 0–1): browser app at `http://127.0.0.1:8765`. No Electron until Milestone 3.
+
+Always use LLMClient (`backend/services/llm_client.py`) for all AI calls.
+Only `llm_client.py` may import the `anthropic` SDK — never in agent files.
 
 Agents run sequentially. Never introduce parallel or concurrent agent execution.
 
-All pipeline progress must be communicated to the frontend via SSE.
-Never use polling as an alternative.
+Pipeline runs as a FastAPI BackgroundTask and publishes to ProgressBus.
+All pipeline progress must reach the frontend via SSE — never client polling.
 
-FastAPI route handlers must be async. No synchronous blocking calls in route handlers.
+Use sync SQLAlchemy with `def` route handlers (threadpool). No async DB driver yet.
+Bind uvicorn to `127.0.0.1` only.

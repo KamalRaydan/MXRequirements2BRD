@@ -2,11 +2,11 @@
 alwaysApply: true
 ---
 
-Never use localStorage or sessionStorage in any React component or artifact.
-Use Zustand for all client-side state.
+MVP (Milestones 0–1): React app in the browser at `localhost:8765`.
+Vite dev proxy forwards `/api` to the FastAPI backend.
 
-Never use HTML form tags. Use React onClick and onChange handlers instead.
+Never use localStorage or sessionStorage. Use Zustand for client-side UI state.
+Never use HTML `<form>` tags — use React `onClick` and `onChange` handlers.
 
-All communication between the Electron main process and the React frontend
-must go through channels defined in electron/preload.js.
-Never use require() or Node APIs directly in renderer process code.
+Milestone 3+: all Electron IPC goes through channels in `electron/preload.js`.
+Never use `require()` or Node APIs directly in renderer code.

@@ -2,9 +2,13 @@
 alwaysApply: true
 ---
 
-The Maximo version selected by the user must always be loaded from
-knowledge/versions/ at pipeline runtime and injected into the
-Domain Agent system prompt dynamically.
+The Maximo version selected by the user must be loaded from `knowledge/versions/`
+at pipeline runtime (via `VERSION_MAP`) and injected into the analyzer and
+generator system prompts dynamically.
 
-Never hardcode Maximo version assumptions in any agent prompt.
+Never hardcode Maximo version facts in Python or agent prompt templates.
 Version-specific behaviour lives in knowledge files, not in code.
+
+MAS 8.x (`mas-8`) is disabled in MVP — show "Coming soon"; do not enable until Milestone 5.
+
+Requirement traceability is document-level: `source_ref` must be the source filename only.
