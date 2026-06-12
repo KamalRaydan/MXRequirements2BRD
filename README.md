@@ -64,10 +64,27 @@ The desktop app is a thin shell: it picks a free port, starts the Python backend
 
 ## Getting started
 
-### Prerequisites
+There are two ways to run MaximoBRD, with **different requirements** depending on who you are:
+
+### For end users (installed app)
+
+You do **not** need the repo, a terminal, Python, or Node. You need only:
+
+- **macOS** (the packaged build is currently macOS-only)
+- The **`MaximoBRD-<version>.dmg`** installer (built by a developer with `npm run build:mac`)
+- An API key from [Anthropic](https://platform.claude.com/) and/or [OpenAI](https://platform.openai.com/)
+
+Install: double-click the DMG → drag **MaximoBRD** into Applications → **right-click the app → Open** the first time (it's unsigned, so a normal double-click is blocked by Gatekeeper) → then add your API key under **Settings**. Everything runs locally; the backend is bundled inside the app.
+
+### For developers (running from the repo)
+
+To run from a clone you need:
+
 - **Node.js 20+**
 - **Python 3.11+**
 - An API key from [Anthropic](https://platform.claude.com/) and/or [OpenAI](https://platform.openai.com/)
+
+The `start.sh` script (below) checks the Node and Python versions for you, but it **cannot install them** — make sure both are present first.
 
 ### Quick start (one command)
 
