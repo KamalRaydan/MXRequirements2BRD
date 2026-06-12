@@ -12,3 +12,5 @@ openai>=1.50
 keyring>=25.0
 pytest>=8.0
 httpx>=0.27
+# Build-only (Milestone 3 desktop packaging): bundles the backend for the Electron app
+pyinstaller>=6.0

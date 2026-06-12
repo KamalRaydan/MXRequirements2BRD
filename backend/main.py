@@ -71,7 +71,7 @@ for prefix in ("", "/api"):
     app.include_router(settings.router, prefix=prefix, include_in_schema=prefix == "")
     app.include_router(pipeline.router, prefix=prefix, include_in_schema=prefix == "")
 
-# Single-command mode: if the frontend has been built, serve it at /
-_dist = config.REPO_DIR / "frontend" / "dist"
-if _dist.exists():
-    app.mount("/", StaticFiles(directory=str(_dist), html=True), name="frontend")
+# Single-command / desktop mode: if the frontend has been built, serve it at /.
+# Path comes from config (bundled inside the PyInstaller binary when packaged).
+if config.FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(config.FRONTEND_DIST), html=True), name="frontend")

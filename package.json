@@ -7,6 +7,9 @@
     "dev:frontend": "cd frontend && npm run dev",
     "build:frontend": "cd frontend && npm run build",
     "test:backend": "cd backend && .venv/bin/python -m pytest tests/ -q",
-    "app": "npm run build:frontend && npm run dev:backend"
+    "app": "npm run build:frontend && npm run dev:backend",
+    "dev:electron": "npm run build:frontend && cd electron && npm start",
+    "build:backend": "npm run build:frontend && cd backend && .venv/bin/python -m PyInstaller --noconfirm maximobrd-backend.spec",
+    "build:mac": "npm run build:backend && cd electron && npm run dist"
   }
 }

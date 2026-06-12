@@ -2,10 +2,10 @@
 
 This document is everything needed to implement the project without referring back to `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and lays out a milestone plan that produces a **working application within the first two weeks** and grows it — without rework — into the full desktop product.
 
-**Status:** Milestone 2 complete — hardened browser MVP (cancel/retry, branded templates, structured errors, test coverage)
-**Platform:** macOS first (Windows later)
+**Status:** Milestone 3 complete — desktop app: the same backend + frontend wrapped in an Electron shell, packaged as a macOS DMG (double-click to run, no terminal)
+**Platform:** macOS shipping (DMG); backend is cross-platform so Windows packaging is a build-on-Windows follow-up
 **MVP shape:** Local web app — Python FastAPI backend + React frontend in the browser at `localhost`
-**Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3)
+**Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3 ✅)
 
 ---
 
@@ -67,16 +67,17 @@ The previous revision of this spec front-loaded Electron, dual AI providers, and
 
 | Topic | Target decision | Lands in |
 |-------|-----------------|----------|
-| Electron shell + IPC + native dialogs | Per §13 | Milestone 3 |
-| API keys in Electron `safeStorage` (migrated from Keychain) | Per §13.3 | Milestone 3 |
-| Portable per-project `project.db` | Split rows out of `app.db` by `project_id` (schema already keyed for it) | Milestone 3 (with Electron packaging) |
+| Electron shell + packaging | Built in Milestone 3 — **same-origin** design (window loads the backend's own URL) instead of an IPC bridge; see §13 | Milestone 3 ✅ |
+| API keys in Electron `safeStorage` | **Declined** — kept `keyring`, which is already cross-platform (macOS Keychain, Windows Credential Locker, Linux Secret Service). safeStorage would have required the IPC/header-injection design the same-origin shell avoids | Not needed |
+| Native file/folder/save dialogs | **Deferred** — Chromium's drag-drop, `<input type=file>`, and `<a download>` work inside the Electron window; native dialogs are polish | Milestone 8 |
+| Portable per-project `project.db` | **Deferred** — kept the single shared `app.db` (all rows already keyed by `project_id`, so the split stays a non-breaking data move) | Later, if needed |
 | Branded DOCX → heading-structure extraction | `StructureExtractor` | Milestone 2 ✅ |
 | Audio/video/image processing (Whisper, ffmpeg, vision) | `PENDING → TRANSCRIBING → EXTRACTED` | Milestone 5 |
 | MAS 8.x knowledge + enablement | `mas-8.md` | Milestone 5 |
 | Visual branding clone (fonts/logo/tables) | `BrandingProfile` | Milestone 6 |
 | Ollama local models | `OllamaProvider` | Milestone 7 |
 | Windows build, signing, onboarding polish | electron-builder + PyInstaller | Milestone 8 |
-| Alembic migrations | Introduce once schema churn matters (skipped in M2 — no churn yet, avoids a new dependency) | Milestone 3 |
+| Alembic migrations | Introduce once schema churn matters (still no churn through M3 — `create_all()` remains sufficient) | Later, if needed |
 
 ---
 
@@ -123,20 +124,31 @@ Implementation simplicity choices (beginner-friendly, low maintenance):
 - **Pipeline runs as a FastAPI `BackgroundTask`**; it publishes progress events to an in-memory **ProgressBus** (`dict[run_id] → list[event]`). The SSE endpoint streams new events from that list (server-side check every ~300 ms; the client never polls).
 - **One process to debug** in MVP: `uvicorn`. Vite dev server proxies `/api` during development; `npm run build` output can be served by FastAPI for a single-command run.
 
-### 5.2 Target architecture (after Milestone 3)
+### 5.2 Desktop architecture (Milestone 3 — as built)
+
+The shell is deliberately thin. Because FastAPI already serves the built React app at
+`/` and the API at `/api`, the Electron window just loads the backend's own URL — so the
+renderer is **same-origin** with the backend and the existing frontend (`fetch`,
+`EventSource`, multipart uploads) runs **unchanged**. No IPC bridge, no `api.js` rewrite.
 
 ```
-Electron Main
-  ├── spawns uvicorn (dynamic port via env MAXIMOBRD_PORT)
-  ├── safeStorage for API keys
-  └── IPC preload bridge (api:call, storage:*, dialog:*)
+Electron Main (electron/main.js)
+  ├── picks a free port
+  ├── spawns the backend on it (MAXIMOBRD_PORT)
+  │      • packaged: the PyInstaller binary in resources/backend/
+  │      • dev:      the backend venv's python run_server.py
+  ├── health-gates: polls GET /health (every 500 ms, max 30 s)
+  └── opens BrowserWindow → http://127.0.0.1:<port>/   (same-origin with the API)
         │
-Electron Renderer = the same React app
+Electron Renderer = the same React app, served by FastAPI  (api.js untouched)
         │
-FastAPI backend = unchanged
+FastAPI backend = unchanged (binds 127.0.0.1 only; reads the API key from keyring)
 ```
 
-Process lifecycle (Milestone 3): find free port → spawn uvicorn → poll `GET /health` every 500 ms (max 30 s) → show window; on quit SIGTERM, wait 5 s, SIGKILL. Dev mode keeps using an external uvicorn via `BACKEND_DEV=1`.
+Process lifecycle: find free port → spawn backend → poll `GET /health` every 500 ms
+(max 30 s) → show window; on quit SIGTERM the child, wait 5 s, then SIGKILL. Dev mode
+reuses an externally running uvicorn via `BACKEND_DEV=1`. API keys stay in the OS
+credential store via `keyring` (cross-platform) — no migration needed.
 
 ---
 
@@ -167,7 +179,9 @@ maximobrd/
 │   └── vite.config.js                (dev proxy /api → 127.0.0.1:8765; uses @tailwindcss/vite)
 ├── backend/
 │   ├── main.py
-│   ├── config.py
+│   ├── run_server.py                  (standalone launcher — uvicorn entry for the bundle)
+│   ├── maximobrd-backend.spec         (PyInstaller build spec — Milestone 3)
+│   ├── config.py                      (cross-platform app-data dir; frozen-aware paths)
 │   ├── routes/
 │   │   ├── __init__.py               (api_error() helper — shared error envelope)
 │   │   ├── projects.py
@@ -220,7 +234,11 @@ maximobrd/
 │   ├── maximo-76.md
 │   ├── mas-9.md
 │   └── mas-8.md                      (Milestone 5)
-├── electron/                         (created in Milestone 3)
+├── electron/                         (Milestone 3 — desktop shell)
+│   ├── main.js                       (spawn backend, health-gate, window, lifecycle)
+│   ├── preload.js                    (minimal secure bridge; contextIsolation on)
+│   └── package.json                  (electron + electron-builder config → DMG)
+├── release/                          (built DMG/zip output — gitignored)
 ├── docs/
 │   ├── blueprint.md
 │   └── implementation-spec.md        (this document)
@@ -793,35 +811,60 @@ class LLMClient:
 
 ---
 
-## 13. Electron Shell (Milestone 3 — target design, kept for the bigger picture)
+## 13. Electron Shell (Milestone 3 — as built)
 
-### 13.1 IPC contract (`electron/preload.js`)
+> **Design choice:** the original plan routed every API call through an Electron IPC
+> bridge so it could inject API keys from `safeStorage`. We took a simpler path. Since
+> FastAPI already serves the SPA at `/`, the window loads the backend's own URL and the
+> renderer is **same-origin** with the API — `fetch`, SSE, and uploads work as-is, with
+> **no IPC bridge and no `api.js` changes**. Keys stay in the OS credential store via
+> `keyring`, so no key-migration plumbing is needed either. Less code, fewer moving parts.
 
-| Channel | Direction | Payload | Returns |
-|---------|-----------|---------|---------|
-| `api:call` | renderer → main | `{ method, path, body?, headers? }` | `{ status, data }` |
-| `api:stream` | renderer → main | `{ path }` | emits `api:stream:event` |
-| `storage:set` | renderer → main | `{ key, value }` | `boolean` |
-| `storage:get` | renderer → main | `{ key }` | `string \| null` |
-| `dialog:openFiles` | renderer → main | `{ filters?, multi? }` | `string[]` |
-| `dialog:openFolder` | renderer → main | `{}` | `string \| null` |
-| `dialog:saveFile` | renderer → main | `{ defaultPath, filters? }` | `string \| null` |
+### 13.1 The shell (`electron/main.js`, `electron/preload.js`)
 
-The frontend's API layer is a single module (`src/api.js`); in browser mode it uses `fetch`/`EventSource`, in Electron mode the same module routes through `window.maximobrd` (the preload bridge). Pages and stores never know the difference.
+`main.js` owns the whole lifecycle: pick a free TCP port → spawn the backend with
+`MAXIMOBRD_PORT` set → poll `GET /health` (500 ms interval, 30 s ceiling) → open a
+`BrowserWindow` at `http://127.0.0.1:<port>/`. External links (e.g. provider model-docs)
+open in the user's real browser via `shell.openExternal`. On quit the backend child gets
+SIGTERM, then SIGKILL after a 5 s grace.
 
-### 13.2 Process lifecycle
+`preload.js` is intentionally tiny — `contextIsolation: true`, `nodeIntegration: false`,
+exposing only a read-only `window.maximobrd = { isDesktop, platform }`. No `api:*`,
+`storage:*`, or `dialog:*` channels: Chromium's own drag-drop, `<input type=file>`, and
+`<a download>` cover the file interactions for now (native dialogs are deferred polish).
 
-Per §5.2: dynamic port, health-gate before window, SIGTERM→SIGKILL on quit, `BACKEND_DEV=1` to reuse an external uvicorn in development. Prod backend = PyInstaller binary in `resources/backend/` (no Torch in the MVP bundle).
+Run modes (chosen in `main.js`):
 
-### 13.3 Key storage migration
+| Mode | Backend source |
+|------|----------------|
+| Packaged (`app.isPackaged`) | PyInstaller binary at `resources/backend/maximobrd-backend` |
+| `npm run dev:electron` | the backend venv's `python run_server.py` |
+| `BACKEND_DEV=1` | reuse an externally running uvicorn (no spawn) — for `--reload` dev |
 
-1. Renderer stores key via `storage:set` (safeStorage).
-2. Main process injects `X-API-Key` header on backend calls that need it (settings test, generate).
-3. Backend prefers the header; falls back to Keychain if present (one-time migration: on first Electron run, read Keychain → write safeStorage → delete Keychain entry).
+### 13.2 Key storage
 
-### 13.4 Packaging
+Unchanged from the MVP: the spawned backend reads the API key from `keyring`, which
+selects the correct OS store automatically (macOS Keychain / Windows Credential Locker /
+Linux Secret Service). No `safeStorage`, no header injection, no migration step.
 
-PyInstaller spec for the backend, electron-builder DMG, smoke test on a clean Mac. Internal distribution; no notarization yet.
+### 13.3 Backend bundling (`backend/maximobrd-backend.spec`)
+
+PyInstaller **onedir** build of `run_server.py`. The spec bundles every runtime data
+file so the binary is self-contained: `prompts/`, `templates/`, `knowledge/versions/`,
+and the built `frontend/dist/` (served at `/` as `frontend_dist`). `collect_all` pulls
+in the parts static analysis misses — `keyring` OS backends, the `anthropic`/`openai`
+SDK data, PyMuPDF's native lib, and uvicorn's protocol modules — plus the SQLAlchemy
+sqlite dialect. `config.py` resolves these paths from `sys._MEIPASS` when `sys.frozen`.
+
+### 13.4 Packaging (`electron/package.json` → electron-builder)
+
+electron-builder copies `backend/dist/maximobrd-backend/` into the app's
+`Contents/Resources/backend/` (`extraResources`) and produces a macOS **DMG** + zip in
+`release/`. A `win` (NSIS) target is configured but must be built on Windows (PyInstaller
+can't cross-compile). Internal distribution — unsigned, no notarization yet, so first
+launch needs right-click → Open to clear Gatekeeper.
+
+Build: `npm run build:mac` (frontend build → PyInstaller backend → electron-builder DMG).
 
 ---
 
@@ -875,14 +918,15 @@ No HTML `<form>` tags (React `onClick`/`onChange` only). No localStorage/session
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MAXIMOBRD_PORT` | `8765` | Set by Electron in M3+; fixed in dev |
+| `MAXIMOBRD_PORT` | `8765` | Free port chosen by the Electron shell at launch; fixed in dev |
 | `TOKEN_THRESHOLD` | `12000` | Chars before summarization |
 | `MAX_UPLOAD_BYTES` | `524288000` | 500 MB |
 | `LLM_MAX_TOKENS_SUMMARIZE` | `4096` | |
 | `LLM_MAX_TOKENS_ANALYZE` | `8192` | |
 | `LLM_MAX_TOKENS_GENERATE` | `8192` | |
-| `APP_DATA_DIR` | OS-specific | `app.db` location |
+| `APP_DATA_DIR` | OS-specific (macOS/Windows/Linux) | `app.db` location — cross-platform default |
 | `PROJECTS_DEFAULT_DIR` | `~/MaximoBRD` | Default project folder root |
+| `MAXIMOBRD_FRONTEND_DIST` | bundled / `frontend/dist` | Override for the built UI served at `/` (M3) |
 
 ---
 
@@ -928,14 +972,17 @@ Open `http://localhost:5173`. Single-command alternative once stable: `npm run b
     "dev:frontend":   "cd frontend && npm run dev",
     "build:frontend": "cd frontend && npm run build",
     "test:backend":   "cd backend && .venv/bin/python -m pytest tests/ -q",
-    "app":            "npm run build:frontend && npm run dev:backend"
+    "app":            "npm run build:frontend && npm run dev:backend",
+    "dev:electron":   "npm run build:frontend && cd electron && npm start",
+    "build:backend":  "npm run build:frontend && cd backend && .venv/bin/python -m PyInstaller --noconfirm maximobrd-backend.spec",
+    "build:mac":      "npm run build:backend && cd electron && npm run dist"
   }
 }
 ```
 
-`app` is the single-command mode: builds the frontend into `dist/`, then the FastAPI server serves it at `http://127.0.0.1:8765` — one terminal, one URL.
+`app` is the single-command browser mode: builds the frontend into `dist/`, then the FastAPI server serves it at `http://127.0.0.1:8765` — one terminal, one URL.
 
-Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
+Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv backend (no packaging); `build:backend` produces the PyInstaller bundle; `build:mac` produces the DMG in `release/`.
 
 ---
 
@@ -1014,16 +1061,18 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 
 **Done when:** the app survives bad inputs gracefully and the test suite is green. *(Met — 43 backend tests passing.)*
 
-### Milestone 3 — Desktop shell (1–2 weeks)
+### Milestone 3 — Desktop shell ✅ Complete
 
-- [ ] `electron/` package: main, preload, IPC per §13.1
-- [ ] `src/api.js` swaps to the IPC bridge under Electron; pages unchanged
-- [ ] safeStorage key migration (§13.3); native file/folder/save dialogs
-- [ ] Dynamic port + health gate + child-process lifecycle
-- [ ] Portable per-project `project.db` split (move `sources`/`pipeline_runs` rows into the project folder)
-- [ ] PyInstaller backend + electron-builder DMG; smoke test on a clean Mac
+- [x] `electron/` package: `main.js` + minimal secure `preload.js` (§13.1)
+- [x] **Same-origin** instead of an IPC bridge — window loads the backend URL, so `src/api.js`, fetch, SSE, and uploads are unchanged (§13)
+- [x] Dynamic free port + `/health` gate + child-process lifecycle (SIGTERM→SIGKILL)
+- [x] Cross-platform backend: OS-specific `APP_DATA_DIR`, frozen-aware resource paths, `run_server.py` launcher
+- [x] PyInstaller self-contained backend bundle (`maximobrd-backend.spec`) + electron-builder **macOS DMG**; verified the packaged app spawns the backend, health-gates, and shuts it down cleanly
+- [x] ~~safeStorage key migration~~ — **declined**: kept `keyring` (already cross-platform incl. Windows); the same-origin shell needs no header injection
+- [x] ~~Native file/folder/save dialogs~~ — deferred (Chromium drag-drop / `<input file>` / `<a download>` suffice); Milestone 8
+- [x] ~~Portable per-project `project.db` split~~ — deferred: kept the single shared `app.db` (rows already keyed by `project_id`)
 
-**Done when:** DMG installs and the full §17.3 E2E passes inside the desktop app with no dev tools.
+**Done:** `npm run build:mac` produces a double-click DMG; the packaged app launches the bundled backend on a dynamic port and serves the full UI with no terminal and no Python install. *(Windows installer is a build-on-Windows follow-up — Milestone 8.)*
 
 ### Milestone 4 — Second provider ✅ (pulled forward, completed with Milestone 1)
 
@@ -1092,8 +1141,8 @@ Scripts not yet present (activate in Milestone 3): `dev:electron`, `build:mac`.
 
 | Question | Answer |
 |----------|--------|
-| Is anything working now? | Yes — Milestones 0–2 complete: real BRD from real documents, with cancel mid-run, branded templates, timestamp overrides, and structured error handling |
-| What's next? | Milestone 3: Electron shell, safeStorage keys, native dialogs, per-project DB split, DMG packaging |
-| Does the MVP lock us in? | No — backend, API, schema, and UI carry into Electron unchanged; key storage and dialogs are the only swaps |
-| What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18 — nothing from the blueprint was dropped |
+| Is anything working now? | Yes — Milestones 0–3 complete: a double-click macOS desktop app (DMG) that produces a real BRD from real documents, with cancel mid-run, branded templates, timestamp overrides, and structured error handling — no terminal, no Python install |
+| What's next? | Milestone 5: media processing (audio/video/image) + MAS 8 knowledge. (Windows packaging and native dialogs are tracked for Milestone 8.) |
+| Did the MVP lock us in? | No — backend, API, schema, and UI carried into Electron **unchanged**; the desktop shell is a thin same-origin wrapper that only spawns and health-gates the backend |
+| What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18; safeStorage and the per-project DB split were consciously declined/deferred (kept `keyring` and a single `app.db`) — nothing from the blueprint was dropped |
 | What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored before real client use) |

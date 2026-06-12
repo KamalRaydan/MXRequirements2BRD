@@ -8,6 +8,11 @@ __pycache__/
 node_modules/
 frontend/dist/
 
+# Electron / packaging build artifacts
+release/
+backend/build/
+backend/dist/
+
 # Local data (never commit user projects or databases)
 *.db
 

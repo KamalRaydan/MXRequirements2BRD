@@ -1,10 +1,19 @@
 """Central configuration. All values overridable via environment variables (spec §15)."""
 import os
+import sys
 from pathlib import Path
 
-# Where this backend package lives (used to find prompts/, templates/, knowledge/)
-BACKEND_DIR = Path(__file__).resolve().parent
-REPO_DIR = BACKEND_DIR.parent
+# When packaged by PyInstaller, `sys.frozen` is set and bundled data files (prompts,
+# templates, knowledge, the built frontend) live under `sys._MEIPASS`. In normal dev
+# runs we resolve those relative to this source file.
+FROZEN = getattr(sys, "frozen", False)
+if FROZEN:
+    _BUNDLE_DIR = Path(getattr(sys, "_MEIPASS"))
+    BACKEND_DIR = _BUNDLE_DIR
+    REPO_DIR = _BUNDLE_DIR
+else:
+    BACKEND_DIR = Path(__file__).resolve().parent
+    REPO_DIR = BACKEND_DIR.parent
 
 PORT = int(os.environ.get("MAXIMOBRD_PORT", "8765"))
 
@@ -18,9 +27,21 @@ LLM_MAX_TOKENS_SUMMARIZE = int(os.environ.get("LLM_MAX_TOKENS_SUMMARIZE", "4096"
 LLM_MAX_TOKENS_ANALYZE = int(os.environ.get("LLM_MAX_TOKENS_ANALYZE", "8192"))
 LLM_MAX_TOKENS_GENERATE = int(os.environ.get("LLM_MAX_TOKENS_GENERATE", "8192"))
 
-# app.db lives in the OS app-data dir (macOS: ~/Library/Application Support/MaximoBRD)
-_default_app_data = Path.home() / "Library" / "Application Support" / "MaximoBRD"
-APP_DATA_DIR = Path(os.environ.get("APP_DATA_DIR", str(_default_app_data)))
+# app.db lives in the OS-specific application-data dir. Cross-platform so the same
+# backend runs under the Electron shell on macOS, Windows, and Linux (the keyring
+# library separately picks the matching OS credential store for the API key).
+def _default_app_data_dir() -> Path:
+    home = Path.home()
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", str(home / "AppData" / "Roaming")))
+    elif sys.platform == "darwin":
+        base = home / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", str(home / ".local" / "share")))
+    return base / "MaximoBRD"
+
+
+APP_DATA_DIR = Path(os.environ.get("APP_DATA_DIR", str(_default_app_data_dir())))
 
 # Default root for new project folders
 PROJECTS_DEFAULT_DIR = Path(os.environ.get("PROJECTS_DEFAULT_DIR", str(Path.home() / "MaximoBRD")))
@@ -28,6 +49,16 @@ PROJECTS_DEFAULT_DIR = Path(os.environ.get("PROJECTS_DEFAULT_DIR", str(Path.home
 KNOWLEDGE_DIR = REPO_DIR / "knowledge" / "versions"
 PROMPTS_DIR = BACKEND_DIR / "prompts"
 TEMPLATES_DIR = BACKEND_DIR / "templates"
+
+# Built React app served at "/". Bundled into the PyInstaller binary (frozen) or read
+# from frontend/dist in dev; overridable so the Electron shell can point elsewhere.
+_frontend_dist_env = os.environ.get("MAXIMOBRD_FRONTEND_DIST")
+if _frontend_dist_env:
+    FRONTEND_DIST = Path(_frontend_dist_env)
+elif FROZEN:
+    FRONTEND_DIST = BACKEND_DIR / "frontend_dist"
+else:
+    FRONTEND_DIST = REPO_DIR / "frontend" / "dist"
 
 APP_VERSION = "0.1.0"
 
