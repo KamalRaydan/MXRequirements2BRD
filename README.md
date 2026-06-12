@@ -69,7 +69,21 @@ The desktop app is a thin shell: it picks a free port, starts the Python backend
 - **Python 3.11+**
 - An API key from [Anthropic](https://platform.claude.com/) and/or [OpenAI](https://platform.openai.com/)
 
-### First-time setup
+### Quick start (one command)
+
+From the repo root:
+
+```bash
+./start.sh
+```
+
+This checks your Node and Python versions, installs the backend (Python venv) and frontend packages the first time, builds the UI, and starts the app at **http://127.0.0.1:8765**. Re-running it is safe and fast — completed setup steps are skipped. (`npm start` runs the same script.)
+
+> The script can't install Node or Python for you — if either is missing or too old, it prints exactly what to install and stops.
+
+### First-time setup (manual)
+
+If you'd rather set things up by hand:
 
 ```bash
 # Backend
