@@ -279,10 +279,11 @@ maximobrd/
 
 | UI label | `maximo_version` key | Knowledge file | MVP |
 |----------|----------------------|----------------|-----|
-| Maximo 7.6.0.x | `maximo-760` | `maximo-76.md` | Enabled |
-| Maximo 7.6.1.x | `maximo-761` | `maximo-76.md` | Enabled |
-| MAS 8.x | `mas-8` | `mas-8.md` | Disabled ("Coming soon") |
+| Maximo 7.6.x | `maximo-76` | `maximo-76.md` | Enabled |
+| MAS 8.x | `mas-8` | `mas-8.md` | Disabled until Milestone 5 |
 | MAS 9.x | `mas-9` | `mas-9.md` | Enabled |
+
+> Simplified 2026-06-12 (user decision): the separate 7.6.0.x / 7.6.1.x entries were merged into one **Maximo 7.6.x**. The legacy keys `maximo-760`/`maximo-761` remain readable (mapped via `config.LEGACY_VERSION_KEYS`) so existing projects keep working.
 
 ### 7.3 Knowledge file minimum content
 
@@ -1082,17 +1083,17 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 
 ### Milestone 5 — Media + MAS 8 (3–4 weeks) — **in progress** (`feat/milestone-5-media-mas8`)
 
-**Proposed design decisions (confirm before building each part):**
+**Design decisions (confirmed by user 2026-06-12):**
 
-1. **Audio transcription is local** — `faster-whisper` (CTranslate2 backend; no PyTorch), default model `small`, downloaded to the app-data dir on first use with progress reported through the source row. Audio never leaves the machine, consistent with §"Security & data".
-2. **Video = audio path + ffmpeg** — extract the audio track with ffmpeg, then reuse the audio transcriber. ffmpeg comes from the `imageio-ffmpeg` wheel (ships a static binary — no Homebrew/system install needed, and PyInstaller picks it up as a normal package data file).
+1. **Audio transcription is local** — prefer the strongest model that runs well on-device: try **NVIDIA Parakeet** first (via `parakeet-mlx` on Apple Silicon — fast, high accuracy). If Parakeet proves hard to integrate or the machine can't run it, fall back to **`faster-whisper`** (CTranslate2 backend; no PyTorch; default model `small`). Models download to the app-data dir on first use with progress reported through the source row. Audio never leaves the machine, consistent with §"Security & data".
+2. **Video = audio track only in M5** — extract the audio with ffmpeg, then reuse the audio transcriber. The *visual* content of videos (e.g., slides in a screen recording) is **not** analyzed in M5; if needed later, keyframe sampling → the image/vision path is the natural extension. ffmpeg comes from the `imageio-ffmpeg` wheel (ships a static binary — no Homebrew/system install needed, and PyInstaller picks it up as a normal package data file).
 3. **Images are the one exception to "text only to the LLM"** — image bytes are sent to the *user's already-configured provider* (Claude / GPT-4o multimodal message) for OCR + description; only the returned text enters the pipeline. The security rule is amended to: "audio/video are processed locally; images may be sent to the configured provider's vision endpoint; raw media is never sent anywhere else."
 4. **Status flow** — media uploads go `UPLOADED → TRANSCRIBING → EXTRACTED | ERROR` (the `PENDING` parking state disappears for supported media types). Processing auto-starts on upload as a FastAPI `BackgroundTask`, exactly like text extraction, and writes the same `extracted/{source_id}.txt` sidecar so the pipeline needs no changes.
 
 **Checklist:**
 
 - [ ] Author `knowledge/versions/mas-8.md` with all §7.3 H2 sections (real prose, not a stub); flip `mas-8` to Enabled in §7.2 and in the New Project modal
-- [ ] `backend/extractors/audio.py` (faster-whisper), `video.py` (ffmpeg → audio → transcribe), `image.py` (provider vision via `llm_client.py` — still the only file importing provider SDKs)
+- [ ] `backend/extractors/audio.py` (Parakeet, falling back to faster-whisper), `video.py` (ffmpeg → audio → transcribe), `image.py` (provider vision via `llm_client.py` — still the only file importing provider SDKs)
 - [ ] Add `TRANSCRIBING` to the §8 state machine and source-status API; update the §8 file-type table (`PENDING`/"No (Milestone 5)" rows become auto-processed)
 - [ ] Frontend: media source rows show a TRANSCRIBING state with progress; transcription errors surface in the row like extraction errors
 - [ ] Tests: unit tests per extractor with tiny fixture files; transcriber and vision calls mocked (no model download, no network in tests)

@@ -40,6 +40,7 @@ def _load_structure(branded_docx_path: str | None = None) -> list[dict]:
 
 def _load_knowledge(maximo_version: str) -> tuple[str, str]:
     """Returns (UI label, knowledge markdown)."""
+    maximo_version = config.LEGACY_VERSION_KEYS.get(maximo_version, maximo_version)
     label, filename, _enabled = config.VERSION_MAP[maximo_version]
     return label, (config.KNOWLEDGE_DIR / filename).read_text(encoding="utf-8")
 

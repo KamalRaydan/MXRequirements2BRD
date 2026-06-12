@@ -64,11 +64,13 @@ APP_VERSION = "0.1.0"
 
 # Maximo version key -> (UI label, knowledge filename, enabled in MVP)
 VERSION_MAP = {
-    "maximo-760": ("Maximo 7.6.0.x", "maximo-76.md", True),
-    "maximo-761": ("Maximo 7.6.1.x", "maximo-76.md", True),
+    "maximo-76": ("Maximo 7.6.x", "maximo-76.md", True),
     "mas-8": ("MAS 8.x", "mas-8.md", False),
     "mas-9": ("MAS 9.x", "mas-9.md", True),
 }
+
+# Projects created before the 7.6 entries were merged may still store these keys.
+LEGACY_VERSION_KEYS = {"maximo-760": "maximo-76", "maximo-761": "maximo-76"}
 
 # Allowed module codes for BRD-{MODULE}-{NNN} IDs (spec §7.5)
 MODULE_CODES = [

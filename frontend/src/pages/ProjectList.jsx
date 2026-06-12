@@ -4,11 +4,13 @@ import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
 
 const VERSIONS = [
-  { key: 'maximo-760', label: 'Maximo 7.6.0.x' },
-  { key: 'maximo-761', label: 'Maximo 7.6.1.x' },
+  { key: 'maximo-76', label: 'Maximo 7.6.x' },
   { key: 'mas-8', label: 'MAS 8.x (Coming soon)', disabled: true },
   { key: 'mas-9', label: 'MAS 9.x' },
 ]
+
+// Projects created before the 7.6 entries were merged may still use these keys.
+const LEGACY_VERSION_LABELS = { 'maximo-760': 'Maximo 7.6.x', 'maximo-761': 'Maximo 7.6.x' }
 
 function NewProjectModal({ onClose }) {
   const navigate = useNavigate()
@@ -152,7 +154,7 @@ export default function ProjectList() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">{p.project_date}</td>
-                  <td className="px-4 py-3">{VERSIONS.find((v) => v.key === p.maximo_version)?.label || p.maximo_version}</td>
+                  <td className="px-4 py-3">{VERSIONS.find((v) => v.key === p.maximo_version)?.label || LEGACY_VERSION_LABELS[p.maximo_version] || p.maximo_version}</td>
                   <td className="px-4 py-3 text-slate-500">{new Date(p.created_at).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-right">
                     <button
