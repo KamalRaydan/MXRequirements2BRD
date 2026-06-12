@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { apiDelete, apiGet, apiPatch, apiPost, refreshSourceDates, uploadBranding, uploadSource } from '../api'
+import { apiDelete, apiGet, apiPatch, apiPost, processSource, refreshSourceDates, uploadBranding, uploadSource } from '../api'
 
 export const useProjectStore = create((set, get) => ({
   projects: [],
@@ -46,6 +46,12 @@ export const useProjectStore = create((set, get) => ({
 
   async deleteSource(projectId, sourceId) {
     await apiDelete(`/projects/${projectId}/sources/${sourceId}`)
+    await get().refreshSources(projectId)
+  },
+
+  // Re-run extraction/transcription for a PENDING (pre-M5) or ERROR source
+  async processSource(projectId, sourceId) {
+    await processSource(projectId, sourceId)
     await get().refreshSources(projectId)
   },
 

@@ -55,6 +55,11 @@ export function refreshSourceDates(projectId) {
   return apiPost(`/projects/${projectId}/sources/refresh-dates`)
 }
 
+// (Re)process a media source that is PENDING (pre-M5 upload) or ERROR
+export function processSource(projectId, sourceId) {
+  return apiPost(`/projects/${projectId}/sources/${sourceId}/process`)
+}
+
 // Branded reference DOCX whose headings replace the default BRD structure
 export function uploadBranding(projectId, file) {
   const form = new FormData()

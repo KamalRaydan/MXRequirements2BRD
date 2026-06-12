@@ -30,7 +30,7 @@ def _unique_filename(folder: Path, filename: str) -> str:
 
 
 def _extract_in_background(source_id: str) -> None:
-    """Runs in a worker thread after upload: EXTRACTING -> EXTRACTED or ERROR."""
+    """Runs in a worker thread after upload: EXTRACTING/TRANSCRIBING -> EXTRACTED or ERROR."""
     db = SessionLocal()
     try:
         source = db.get(Source, source_id)
@@ -87,10 +87,10 @@ async def upload_source(
     filetype = processors.classify(filename)
     if processors.is_extractable(filetype):
         status, error = "EXTRACTING", None
-    elif filetype == "unknown":
-        status, error = "ERROR", "Unsupported file type"
+    elif processors.is_media(filetype):
+        status, error = "TRANSCRIBING", None  # audio/video/image — processed on upload (M5)
     else:
-        status, error = "PENDING", None  # audio/video/image — Milestone 5
+        status, error = "ERROR", "Unsupported file type"
 
     # Date precedence: the file's own embedded metadata (survives email/download,
     # unlike filesystem mtime) > browser-reported modified time > upload time.
@@ -117,9 +117,32 @@ async def upload_source(
     db.add(source)
     db.commit()
 
-    if status == "EXTRACTING":
+    if status in ("EXTRACTING", "TRANSCRIBING"):
         background_tasks.add_task(_extract_in_background, source.id)
 
+    return source
+
+
+@router.post("/projects/{project_id}/sources/{source_id}/process", response_model=SourceOut)
+def process_source(
+    project_id: str,
+    source_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """(Re)process a source: media uploaded before Milestone 5 (PENDING) or a failed one (ERROR)."""
+    source = db.get(Source, source_id)
+    if not source or source.project_id != project_id:
+        raise api_error(404, "NOT_FOUND", "Source not found")
+    if source.processing_status not in ("PENDING", "ERROR"):
+        raise api_error(409, "ALREADY_PROCESSED", "This source is already processed or in progress")
+    if source.filetype == "unknown":
+        raise api_error(422, "UNSUPPORTED", "Unsupported file type")
+
+    source.processing_status = "TRANSCRIBING" if processors.is_media(source.filetype) else "EXTRACTING"
+    source.error_message = None
+    db.commit()
+    background_tasks.add_task(_extract_in_background, source.id)
     return source
 
 

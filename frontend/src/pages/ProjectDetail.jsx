@@ -23,7 +23,7 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const {
     current, sources, runs, branding, loadProject, refreshSources, uploadFiles,
-    deleteSource, setSourceDate, refreshDates, setBranding, removeBranding,
+    deleteSource, processSource, setSourceDate, refreshDates, setBranding, removeBranding,
   } = useProjectStore()
   const { configured, loaded, load } = useSettingsStore()
   const [dragOver, setDragOver] = useState(false)
@@ -41,13 +41,14 @@ export default function ProjectDetail() {
     if (!loaded) load()
   }, [id])
 
-  // While any source is still extracting, refresh its status every 2s
-  const extracting = sources.some((s) => s.processing_status === 'EXTRACTING')
+  // While any source is still extracting or transcribing, refresh its status every 2s
+  const processing = sources.some((s) =>
+    s.processing_status === 'EXTRACTING' || s.processing_status === 'TRANSCRIBING')
   useEffect(() => {
-    if (!extracting) return
+    if (!processing) return
     const timer = setInterval(() => refreshSources(id), 2000)
     return () => clearInterval(timer)
-  }, [extracting, id])
+  }, [processing, id])
 
   async function handleFiles(files) {
     if (!files?.length) return
@@ -120,7 +121,8 @@ export default function ProjectDetail() {
           }`}
         >
           <p className="text-sm text-slate-600">
-            Drag &amp; drop requirement documents here (PDF, DOCX, TXT, MD, XLSX — media files stored for later processing)
+            Drag &amp; drop requirement sources here — documents (PDF, DOCX, TXT, MD, XLSX),
+            recordings (MP3, WAV, M4A, MP4, MOV), and images (PNG, JPG)
           </p>
           <button
             onClick={() => fileInput.current?.click()}
@@ -193,6 +195,15 @@ export default function ProjectDetail() {
                       <StatusBadge status={s.processing_status} title={s.error_message} />
                     </td>
                     <td className="px-4 py-2 text-right">
+                      {(s.processing_status === 'PENDING' || s.processing_status === 'ERROR') &&
+                        s.filetype !== 'unknown' && (
+                          <button
+                            onClick={() => processSource(id, s.id)}
+                            className="mr-3 text-xs font-medium text-blue-600 hover:underline"
+                          >
+                            {s.processing_status === 'PENDING' ? 'Process' : 'Retry'}
+                          </button>
+                        )}
                       <button
                         onClick={() => {
                           setEditingSourceId(s.id)

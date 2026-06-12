@@ -5,7 +5,7 @@ import { useSettingsStore } from '../store/settingsStore'
 
 const VERSIONS = [
   { key: 'maximo-76', label: 'Maximo 7.6.x' },
-  { key: 'mas-8', label: 'MAS 8.x (Coming soon)', disabled: true },
+  { key: 'mas-8', label: 'MAS 8.x' },
   { key: 'mas-9', label: 'MAS 9.x' },
 ]
 

@@ -65,7 +65,7 @@ APP_VERSION = "0.1.0"
 # Maximo version key -> (UI label, knowledge filename, enabled in MVP)
 VERSION_MAP = {
     "maximo-76": ("Maximo 7.6.x", "maximo-76.md", True),
-    "mas-8": ("MAS 8.x", "mas-8.md", False),
+    "mas-8": ("MAS 8.x", "mas-8.md", True),
     "mas-9": ("MAS 9.x", "mas-9.md", True),
 }
 

@@ -2,7 +2,7 @@
 
 This document is everything needed to implement the project without referring back to `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and lays out a milestone plan that produces a **working application within the first two weeks** and grows it — without rework — into the full desktop product.
 
-**Status:** Milestone 5 in progress (`feat/milestone-5-media-mas8`) — media processing (audio/video/image) + MAS 8 knowledge. Milestones 0–4 complete: desktop app (Electron shell + macOS DMG) wrapping the same backend + frontend, with Anthropic + OpenAI providers
+**Status:** Milestone 5 complete — media sources (audio/video/image) are processed on upload: local ASR (Parakeet, faster-whisper fallback) for recordings, provider vision for images; MAS 8 knowledge authored and enabled. Milestones 0–4 already shipped the desktop app (Electron + macOS DMG) with Anthropic + OpenAI providers
 **Platform:** macOS shipping (DMG); backend is cross-platform so Windows packaging is a build-on-Windows follow-up
 **MVP shape:** Local web app — Python FastAPI backend + React frontend in the browser at `localhost`
 **Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3 ✅)
@@ -72,8 +72,8 @@ The previous revision of this spec front-loaded Electron, dual AI providers, and
 | Native file/folder/save dialogs | **Deferred** — Chromium's drag-drop, `<input type=file>`, and `<a download>` work inside the Electron window; native dialogs are polish | Milestone 8 |
 | Portable per-project `project.db` | **Deferred** — kept the single shared `app.db` (all rows already keyed by `project_id`, so the split stays a non-breaking data move) | Later, if needed |
 | Branded DOCX → heading-structure extraction | `StructureExtractor` | Milestone 2 ✅ |
-| Audio/video/image processing (Whisper, ffmpeg, vision) | `PENDING → TRANSCRIBING → EXTRACTED` | Milestone 5 |
-| MAS 8.x knowledge + enablement | `mas-8.md` | Milestone 5 |
+| Audio/video/image processing (local ASR, ffmpeg, vision) | `UPLOADED → TRANSCRIBING → EXTRACTED` | Milestone 5 ✅ |
+| MAS 8.x knowledge + enablement | `mas-8.md` | Milestone 5 ✅ |
 | Visual branding clone (fonts/logo/tables) | `BrandingProfile` | Milestone 6 |
 | Ollama local models | `OllamaProvider` | Milestone 7 |
 | Windows build, signing, onboarding polish | electron-builder + PyInstaller | Milestone 8 |
@@ -193,7 +193,8 @@ maximobrd/
 │   │   ├── docx_renderer.py
 │   │   ├── progress_bus.py
 │   │   ├── keystore.py               (macOS Keychain wrapper via keyring)
-│   │   └── structure_extractor.py    (branded-template heading extraction)
+│   │   ├── structure_extractor.py    (branded-template heading extraction)
+│   │   └── asr.py                    (local speech-to-text: Parakeet → faster-whisper, M5)
 │   ├── agents/
 │   │   ├── runner.py                 (pipeline orchestrator — BackgroundTask entry point)
 │   │   ├── extractor.py
@@ -204,7 +205,9 @@ maximobrd/
 │   │   ├── __init__.py               (classify/is_extractable/extract_text/embedded_date dispatch)
 │   │   ├── pdf.py, docx.py, xlsx.py, plaintext.py
 │   │   ├── filedates.py              (embedded created/modified dates from PDF/DOCX/XLSX metadata)
-│   │   └── (audio.py, video.py, image.py — Milestone 5)
+│   │   ├── audio.py                  (ffmpeg → 16 kHz WAV → local ASR, M5)
+│   │   ├── video.py                  (audio-track-only path, M5)
+│   │   └── image.py                  (provider vision via llm_client, M5)
 │   ├── models/
 │   │   ├── project.py, pipeline.py, settings.py
 │   ├── db/
@@ -228,12 +231,13 @@ maximobrd/
 │   │   ├── test_structure_extractor.py
 │   │   ├── test_branding.py
 │   │   ├── test_filedates.py
+│   │   ├── test_media_processors.py  (M5 — ASR/vision mocked, ffmpeg real)
 │   │   └── test_pipeline_integration.py
 │   └── requirements.txt
 ├── knowledge/versions/
 │   ├── maximo-76.md
 │   ├── mas-9.md
-│   └── mas-8.md                      (Milestone 5)
+│   └── mas-8.md                      (authored in Milestone 5)
 ├── electron/                         (Milestone 3 — desktop shell)
 │   ├── main.js                       (spawn backend, health-gate, window, lifecycle)
 │   ├── preload.js                    (minimal secure bridge; contextIsolation on)
@@ -280,7 +284,7 @@ maximobrd/
 | UI label | `maximo_version` key | Knowledge file | MVP |
 |----------|----------------------|----------------|-----|
 | Maximo 7.6.x | `maximo-76` | `maximo-76.md` | Enabled |
-| MAS 8.x | `mas-8` | `mas-8.md` | Disabled until Milestone 5 |
+| MAS 8.x | `mas-8` | `mas-8.md` | Enabled (Milestone 5) |
 | MAS 9.x | `mas-9` | `mas-9.md` | Enabled |
 
 > Simplified 2026-06-12 (user decision): the separate 7.6.0.x / 7.6.1.x entries were merged into one **Maximo 7.6.x**. The legacy keys `maximo-760`/`maximo-761` remain readable (mapped via `config.LEGACY_VERSION_KEYS`) so existing projects keep working.
@@ -332,28 +336,26 @@ ID assignment (deterministic, post-LLM):
          upload     │  UPLOADED   │  (file on disk)
         ──────────► │             │
                     └──────┬──────┘
-                           │ auto-extract (text types)
-                    ┌──────▼──────┐
-                    │ EXTRACTING  │
-                    └──────┬──────┘
-              success      │      failure
-         ┌─────────────────┼─────────────────┐
-         ▼                 │                 ▼
-  ┌─────────────┐          │          ┌─────────────┐
-  │  EXTRACTED  │          │          │    ERROR    │
-  └─────────────┘          │          └─────────────┘
-                           │
-              (audio/video/image — until Milestone 5)
-                    ┌──────▼──────┐
-                    │   PENDING   │  "Processing available in a later release"
-                    └─────────────┘
+          text types       │       media types (M5)
+         ┌─────────────────┴─────────────────┐
+         ▼                                   ▼
+  ┌─────────────┐                    ┌──────────────┐
+  │ EXTRACTING  │                    │ TRANSCRIBING │  (local ASR / ffmpeg / vision)
+  └──────┬──────┘                    └──────┬───────┘
+         │        success / failure        │
+         └───────────┬───────────┬─────────┘
+                     ▼           ▼
+              ┌────────────┐ ┌─────────┐
+              │ EXTRACTED  │ │  ERROR  │ ──► Retry (POST …/process)
+              └────────────┘ └─────────┘
 ```
 
 **Rules:**
 
 - `POST /generate` requires ≥1 source with `processing_status = EXTRACTED`.
 - Pipeline Stage 1 reads from `extracted/{source_id}.txt`; re-extracts only if sidecar missing.
-- `PENDING` and `ERROR` sources are skipped in pipeline with logged warnings.
+- `PENDING`, `ERROR`, and still-in-flight (`EXTRACTING`/`TRANSCRIBING`) sources are skipped in pipeline with logged warnings.
+- `PENDING` now only appears on media rows uploaded before Milestone 5; `POST /projects/{id}/sources/{source_id}/process` (re)processes a `PENDING` or `ERROR` source (the UI shows it as Process/Retry).
 
 ### File type classification
 
@@ -363,9 +365,9 @@ ID assignment (deterministic, post-LLM):
 | docx | `docx` | UPLOADED → EXTRACTING | Yes |
 | txt, md | `plaintext` | UPLOADED → EXTRACTING | Yes |
 | xlsx, xls | `spreadsheet` | UPLOADED → EXTRACTING | Yes |
-| mp3, wav, m4a, ogg | `audio` | PENDING | No (Milestone 5) |
-| mp4, mov, webm | `video` | PENDING | No (Milestone 5) |
-| png, jpg, jpeg, webp | `image` | PENDING | No (Milestone 5) |
+| mp3, wav, m4a, ogg | `audio` | UPLOADED → TRANSCRIBING | Yes — local ASR (M5) |
+| mp4, mov, webm | `video` | UPLOADED → TRANSCRIBING | Yes — ffmpeg audio track → local ASR (M5) |
+| png, jpg, jpeg, webp | `image` | UPLOADED → TRANSCRIBING | Yes — provider vision OCR/description (M5) |
 | other | `unknown` | ERROR | No — error message set |
 
 ---
@@ -1081,7 +1083,7 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 - [x] Settings UI: provider radio + per-provider model defaults + model-docs hyperlinks
 - [x] Per-provider API keys in the Keychain (`api_key_anthropic`, `api_key_openai`)
 
-### Milestone 5 — Media + MAS 8 (3–4 weeks) — **in progress** (`feat/milestone-5-media-mas8`)
+### Milestone 5 — Media + MAS 8 ✅ Complete (built on `feat/milestone-5-media-mas8`)
 
 **Design decisions (confirmed by user 2026-06-12):**
 
@@ -1092,12 +1094,15 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 
 **Checklist:**
 
-- [ ] Author `knowledge/versions/mas-8.md` with all §7.3 H2 sections (real prose, not a stub); flip `mas-8` to Enabled in §7.2 and in the New Project modal
-- [ ] `backend/extractors/audio.py` (Parakeet, falling back to faster-whisper), `video.py` (ffmpeg → audio → transcribe), `image.py` (provider vision via `llm_client.py` — still the only file importing provider SDKs)
-- [ ] Add `TRANSCRIBING` to the §8 state machine and source-status API; update the §8 file-type table (`PENDING`/"No (Milestone 5)" rows become auto-processed)
-- [ ] Frontend: media source rows show a TRANSCRIBING state with progress; transcription errors surface in the row like extraction errors
-- [ ] Tests: unit tests per extractor with tiny fixture files; transcriber and vision calls mocked (no model download, no network in tests)
-- [ ] Packaging: bundle ffmpeg + handle the Whisper model cache path in the PyInstaller build; rebuild and smoke-test the DMG
+- [x] Author `knowledge/versions/mas-8.md` with all §7.3 H2 sections (real prose, not a stub); flip `mas-8` to Enabled in §7.2 and in the New Project modal
+- [x] `backend/processors/audio.py` (local ASR via `services/asr.py`: Parakeet, falling back to faster-whisper), `video.py` (ffmpeg → audio → transcribe), `image.py` (provider vision via `llm_client.py` — still the only file importing provider SDKs)
+- [x] Add `TRANSCRIBING` to the §8 state machine and source-status API; update the §8 file-type table; `POST …/sources/{id}/process` retries PENDING (pre-M5) and ERROR sources
+- [x] Frontend: media source rows show a TRANSCRIBING state with live polling; transcription errors surface in the row like extraction errors; Process/Retry button on PENDING/ERROR rows
+- [x] Tests: unit + API tests per extractor with tiny generated fixtures; ASR and vision calls mocked (no model download, no network in tests) — ffmpeg conversion runs for real
+- [x] Packaging: ffmpeg (imageio-ffmpeg), CTranslate2/tokenizers, and the MLX/Parakeet stack added to the PyInstaller spec; ASR model cache lives in the app-data dir (`models/`)
+- [x] Rebuild + smoke-test the packaged app: PyInstaller bundle and `MaximoBRD-0.1.0-arm64.dmg` rebuilt; the frozen backend health-gated and transcribed a real recording end-to-end (upload → TRANSCRIBING → EXTRACTED, transcript verbatim)
+
+**Done when:** a recording or photo uploaded to the app becomes EXTRACTED text that flows into the BRD. *(Met — real Parakeet transcription verified in dev and in the frozen bundle; 55 backend tests passing.)*
 
 ### Milestone 6 — Branding clone (2–3 weeks)
 
@@ -1154,8 +1159,8 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 
 | Question | Answer |
 |----------|--------|
-| Is anything working now? | Yes — Milestones 0–3 complete: a double-click macOS desktop app (DMG) that produces a real BRD from real documents, with cancel mid-run, branded templates, timestamp overrides, and structured error handling — no terminal, no Python install |
-| What's next? | Milestone 5 (in progress): media processing (audio/video/image) + MAS 8 knowledge — see §18 for the design decisions and checklist. (Windows packaging and native dialogs are tracked for Milestone 8.) |
+| Is anything working now? | Yes — Milestones 0–5 complete: a double-click macOS desktop app (DMG) that produces a real BRD from documents, recordings (transcribed locally with Parakeet), and images (provider vision), with cancel mid-run, branded templates, timestamp overrides, and structured error handling — no terminal, no Python install |
+| What's next? | Milestone 6: visual branding clone (fonts/logo/tables from the client's reference DOCX). (Windows packaging and native dialogs are tracked for Milestone 8.) |
 | Did the MVP lock us in? | No — backend, API, schema, and UI carried into Electron **unchanged**; the desktop shell is a thin same-origin wrapper that only spawns and health-gates the backend |
 | What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18; safeStorage and the per-project DB split were consciously declined/deferred (kept `keyring` and a single `app.db`) — nothing from the blueprint was dropped |
 | What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored before real client use) |

@@ -42,7 +42,7 @@ class Source(Base):
     file_size_bytes: Mapped[int] = mapped_column(Integer)
     source_timestamp: Mapped[datetime] = mapped_column(DateTime)
     user_timestamp_override: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    processing_status: Mapped[str] = mapped_column(String)  # UPLOADED/EXTRACTING/EXTRACTED/PENDING/ERROR
+    processing_status: Mapped[str] = mapped_column(String)  # UPLOADED/EXTRACTING/TRANSCRIBING/EXTRACTED/PENDING/ERROR
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_text_path: Mapped[str | None] = mapped_column(String, nullable=True)
     char_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

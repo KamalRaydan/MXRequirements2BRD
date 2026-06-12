@@ -26,7 +26,20 @@ hiddenimports = []
 # These pull in data files, native libs, and/or dynamically-discovered submodules
 # (keyring's OS credential backends, the SDK token data, PyMuPDF's native lib,
 # uvicorn's protocol implementations) that PyInstaller's static analysis misses.
-for pkg in ("keyring", "anthropic", "openai", "pymupdf", "uvicorn"):
+collect_pkgs = ["keyring", "anthropic", "openai", "pymupdf", "uvicorn"]
+
+# Milestone 5 media stack: the static ffmpeg binary inside imageio_ffmpeg,
+# faster-whisper's CTranslate2/tokenizer native libs, and — on Apple Silicon —
+# Parakeet's MLX runtime (metallib) and librosa's data files.
+collect_pkgs += ["imageio_ffmpeg", "faster_whisper", "ctranslate2", "tokenizers",
+                 "huggingface_hub", "av"]
+try:
+    import parakeet_mlx  # noqa: F401 — only bundled where installed (macOS arm64)
+    collect_pkgs += ["parakeet_mlx", "mlx", "librosa", "numba", "llvmlite"]
+except ImportError:
+    pass
+
+for pkg in collect_pkgs:
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries

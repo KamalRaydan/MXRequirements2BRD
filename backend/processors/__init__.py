@@ -27,6 +27,10 @@ def is_extractable(filetype: str) -> bool:
     return filetype in {"pdf", "docx", "plaintext", "spreadsheet"}
 
 
+def is_media(filetype: str) -> bool:
+    return filetype in {"audio", "video", "image"}
+
+
 def embedded_date(filetype: str, filepath: str):
     """Date stored inside the file's own metadata (UTC), or None."""
     from processors import filedates
@@ -52,4 +56,13 @@ def extract_text(filetype: str, filepath: str) -> tuple[str, int | None]:
         return plaintext_proc.extract(filepath), None
     if filetype == "spreadsheet":
         return xlsx_proc.extract(filepath), None
+    if filetype == "audio":
+        from processors import audio as audio_proc
+        return audio_proc.extract(filepath), None
+    if filetype == "video":
+        from processors import video as video_proc
+        return video_proc.extract(filepath), None
+    if filetype == "image":
+        from processors import image as image_proc
+        return image_proc.extract(filepath), None
     raise ValueError(f"No processor for filetype '{filetype}'")

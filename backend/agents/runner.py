@@ -65,7 +65,8 @@ def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str,
         sources.sort(key=lambda s: s.effective_timestamp)
         skipped = (
             db.query(Source)
-            .filter(Source.project_id == project_id, Source.processing_status.in_(["PENDING", "ERROR"]))
+            .filter(Source.project_id == project_id,
+                    Source.processing_status.in_(["PENDING", "ERROR", "TRANSCRIBING", "EXTRACTING"]))
             .count()
         )
         run.sources_used_count = len(sources)

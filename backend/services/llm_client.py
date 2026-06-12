@@ -1,15 +1,18 @@
 """All LLM calls go through here. Only this file imports the `anthropic` and
 `openai` SDKs (spec §12.7).
 
-- complete():      plain text completion
-- complete_json(): structured JSON validated against a Pydantic schema, with one
-                   "fix this JSON" retry on validation failure.
-                   Anthropic: forced tool-use carrying the schema.
-                   OpenAI: response_format=json_object + schema in the system message.
+- complete():       plain text completion
+- complete_json():  structured JSON validated against a Pydantic schema, with one
+                    "fix this JSON" retry on validation failure.
+                    Anthropic: forced tool-use carrying the schema.
+                    OpenAI: response_format=json_object + schema in the system message.
+- describe_image(): image → OCR + description text (Milestone 5 vision path)
 - 3 transport retries with exponential backoff starting at 2s (both providers)
 """
+import base64
 import json
 import time
+from pathlib import Path
 
 import anthropic
 import openai
@@ -97,6 +100,44 @@ class LLMClient:
         oa_messages = ([{"role": "system", "content": system}] if system else []) + messages
         response = self._with_retries(lambda: self._openai.chat.completions.create(
             model=self.model_id, messages=oa_messages, max_completion_tokens=max_tokens,
+        ))
+        return response.choices[0].message.content or ""
+
+    # ---- image → text (vision, Milestone 5) ----
+
+    _IMAGE_MEDIA_TYPES = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+    }
+
+    VISION_PROMPT = (
+        "This image is a source document for business requirements gathering — for example "
+        "a whiteboard photo, presentation slide, screenshot, or scanned page. Transcribe ALL "
+        "readable text exactly as written, then briefly describe any diagrams, tables, or "
+        "annotations and what they convey. Respond with plain text only."
+    )
+
+    def describe_image(self, filepath: str, max_tokens: int = 4096) -> str:
+        media_type = self._IMAGE_MEDIA_TYPES.get(Path(filepath).suffix.lower())
+        if not media_type:
+            raise LLMError(f"Unsupported image format '{Path(filepath).suffix}'")
+        data = base64.standard_b64encode(Path(filepath).read_bytes()).decode()
+
+        if self.provider == "anthropic":
+            message = {"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}},
+                {"type": "text", "text": self.VISION_PROMPT},
+            ]}
+            response = self._with_retries(lambda: self._anthropic.messages.create(
+                model=self.model_id, messages=[message], max_tokens=max_tokens,
+            ))
+            return "".join(block.text for block in response.content if block.type == "text")
+
+        message = {"role": "user", "content": [
+            {"type": "text", "text": self.VISION_PROMPT},
+            {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{data}"}},
+        ]}
+        response = self._with_retries(lambda: self._openai.chat.completions.create(
+            model=self.model_id, messages=[message], max_completion_tokens=max_tokens,
         ))
         return response.choices[0].message.content or ""
 
