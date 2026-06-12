@@ -2,7 +2,7 @@
 
 This document is everything needed to implement the project without referring back to `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and lays out a milestone plan that produces a **working application within the first two weeks** and grows it — without rework — into the full desktop product.
 
-**Status:** Milestone 3 complete — desktop app: the same backend + frontend wrapped in an Electron shell, packaged as a macOS DMG (double-click to run, no terminal)
+**Status:** Milestone 5 in progress (`feat/milestone-5-media-mas8`) — media processing (audio/video/image) + MAS 8 knowledge. Milestones 0–4 complete: desktop app (Electron shell + macOS DMG) wrapping the same backend + frontend, with Anthropic + OpenAI providers
 **Platform:** macOS shipping (DMG); backend is cross-platform so Windows packaging is a build-on-Windows follow-up
 **MVP shape:** Local web app — Python FastAPI backend + React frontend in the browser at `localhost`
 **Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3 ✅)
@@ -1080,11 +1080,23 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 - [x] Settings UI: provider radio + per-provider model defaults + model-docs hyperlinks
 - [x] Per-provider API keys in the Keychain (`api_key_anthropic`, `api_key_openai`)
 
-### Milestone 5 — Media + MAS 8 (3–4 weeks)
+### Milestone 5 — Media + MAS 8 (3–4 weeks) — **in progress** (`feat/milestone-5-media-mas8`)
 
-- [ ] Author `mas-8.md`; enable `mas-8` in UI
-- [ ] `audio.py`, `video.py`, `image.py` processors; Whisper + ffmpeg bundling
-- [ ] `PENDING → TRANSCRIBING → EXTRACTED` flow; vision API for images (text only sent to LLM)
+**Proposed design decisions (confirm before building each part):**
+
+1. **Audio transcription is local** — `faster-whisper` (CTranslate2 backend; no PyTorch), default model `small`, downloaded to the app-data dir on first use with progress reported through the source row. Audio never leaves the machine, consistent with §"Security & data".
+2. **Video = audio path + ffmpeg** — extract the audio track with ffmpeg, then reuse the audio transcriber. ffmpeg comes from the `imageio-ffmpeg` wheel (ships a static binary — no Homebrew/system install needed, and PyInstaller picks it up as a normal package data file).
+3. **Images are the one exception to "text only to the LLM"** — image bytes are sent to the *user's already-configured provider* (Claude / GPT-4o multimodal message) for OCR + description; only the returned text enters the pipeline. The security rule is amended to: "audio/video are processed locally; images may be sent to the configured provider's vision endpoint; raw media is never sent anywhere else."
+4. **Status flow** — media uploads go `UPLOADED → TRANSCRIBING → EXTRACTED | ERROR` (the `PENDING` parking state disappears for supported media types). Processing auto-starts on upload as a FastAPI `BackgroundTask`, exactly like text extraction, and writes the same `extracted/{source_id}.txt` sidecar so the pipeline needs no changes.
+
+**Checklist:**
+
+- [ ] Author `knowledge/versions/mas-8.md` with all §7.3 H2 sections (real prose, not a stub); flip `mas-8` to Enabled in §7.2 and in the New Project modal
+- [ ] `backend/extractors/audio.py` (faster-whisper), `video.py` (ffmpeg → audio → transcribe), `image.py` (provider vision via `llm_client.py` — still the only file importing provider SDKs)
+- [ ] Add `TRANSCRIBING` to the §8 state machine and source-status API; update the §8 file-type table (`PENDING`/"No (Milestone 5)" rows become auto-processed)
+- [ ] Frontend: media source rows show a TRANSCRIBING state with progress; transcription errors surface in the row like extraction errors
+- [ ] Tests: unit tests per extractor with tiny fixture files; transcriber and vision calls mocked (no model download, no network in tests)
+- [ ] Packaging: bundle ffmpeg + handle the Whisper model cache path in the PyInstaller build; rebuild and smoke-test the DMG
 
 ### Milestone 6 — Branding clone (2–3 weeks)
 
@@ -1142,7 +1154,7 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 | Question | Answer |
 |----------|--------|
 | Is anything working now? | Yes — Milestones 0–3 complete: a double-click macOS desktop app (DMG) that produces a real BRD from real documents, with cancel mid-run, branded templates, timestamp overrides, and structured error handling — no terminal, no Python install |
-| What's next? | Milestone 5: media processing (audio/video/image) + MAS 8 knowledge. (Windows packaging and native dialogs are tracked for Milestone 8.) |
+| What's next? | Milestone 5 (in progress): media processing (audio/video/image) + MAS 8 knowledge — see §18 for the design decisions and checklist. (Windows packaging and native dialogs are tracked for Milestone 8.) |
 | Did the MVP lock us in? | No — backend, API, schema, and UI carried into Electron **unchanged**; the desktop shell is a thin same-origin wrapper that only spawns and health-gates the backend |
 | What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18; safeStorage and the per-project DB split were consciously declined/deferred (kept `keyring` and a single `app.db`) — nothing from the blueprint was dropped |
 | What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored before real client use) |
