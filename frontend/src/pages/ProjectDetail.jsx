@@ -20,6 +20,41 @@ function viewLabel(filetype) {
   return 'View text'
 }
 
+// Compact summary of the visual branding detected in the reference DOCX (M6).
+// Word leaves fonts/colours unset when they come from the theme, so any field
+// may be missing — we only show what we actually found.
+function DetectedBranding({ profile }) {
+  const body = [profile.body_font, profile.body_size_pt && `${profile.body_size_pt}pt`]
+    .filter(Boolean).join(' ')
+  const items = [
+    body && ['Body font', body],
+    profile.heading_font && ['Heading font', profile.heading_font],
+    profile.heading_color && ['Heading colour', `#${profile.heading_color}`, true],
+    profile.table_style && ['Table style', profile.table_style],
+    ['Logo', profile.logo_found ? 'detected' : 'none'],
+  ].filter(Boolean)
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-100 bg-slate-50 p-3 text-sm text-slate-600">
+      <p className="mb-1 font-medium text-slate-700">Detected branding</p>
+      <dl className="flex flex-wrap gap-x-6 gap-y-1">
+        {items.map(([label, value, isColor]) => (
+          <div key={label} className="flex items-center gap-1.5">
+            <dt className="text-slate-500">{label}:</dt>
+            <dd className="flex items-center gap-1.5 font-medium text-slate-700">
+              {isColor && (
+                <span className="inline-block h-3 w-3 rounded-sm border border-slate-300"
+                      style={{ backgroundColor: value }} />
+              )}
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
 // ISO timestamp -> "YYYY-MM-DDTHH:mm" in local time, for <input type="datetime-local">
 function toLocalInputValue(iso) {
   const d = new Date(iso)
@@ -276,8 +311,8 @@ export default function ProjectDetail() {
             <h2 className="text-base font-semibold">Branded Template</h2>
             <p className="text-sm text-slate-500">
               {branding.branded_docx_path
-                ? 'The BRD will follow this document’s heading structure.'
-                : 'Optional: upload a client DOCX — its headings replace the default BRD structure.'}
+                ? 'The BRD clones this document’s heading structure, fonts, colours, table style, and header logo.'
+                : 'Optional: upload a client DOCX — the BRD adopts its headings, fonts, colours, table style, and logo.'}
             </p>
           </div>
           <div className="flex gap-2">
@@ -319,6 +354,7 @@ export default function ProjectDetail() {
             ))}
           </ul>
         )}
+        {branding.profile && <DetectedBranding profile={branding.profile} />}
       </section>
 
       {/* Generate */}

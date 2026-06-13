@@ -49,6 +49,22 @@ def test_upload_branding_returns_heading_preview(client, project):
     assert len(preview["headings"]) == 2
 
 
+def test_upload_branding_returns_and_persists_profile(client, project):
+    """The visual branding profile is returned on upload and on later GETs (M6)."""
+    response = client.put(
+        f"/projects/{project['id']}/branding",
+        files={"file": ("t.docx", _docx_bytes([("Scope", 1)]))},
+    )
+    profile = response.json()["profile"]
+    assert profile is not None
+    # A heading-only template has no logo and uses theme fonts
+    assert profile["logo_found"] is False
+    assert "table_style" in profile
+
+    # Profile survives a page reload (loaded from profile.json)
+    assert client.get(f"/projects/{project['id']}/branding").json()["profile"] == profile
+
+
 def test_upload_branding_rejects_non_docx(client, project):
     response = client.put(
         f"/projects/{project['id']}/branding",
@@ -81,4 +97,4 @@ def test_delete_branding_reverts_to_default(client, project):
 
     assert client.delete(f"/projects/{project['id']}/branding").status_code == 204
     preview = client.get(f"/projects/{project['id']}/branding").json()
-    assert preview == {"branded_docx_path": None, "headings": []}
+    assert preview == {"branded_docx_path": None, "headings": [], "profile": None}

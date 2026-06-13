@@ -6,7 +6,7 @@ export const useProjectStore = create((set, get) => ({
   current: null, // full project incl. source_count + latest_run
   sources: [],
   runs: [],
-  branding: { branded_docx_path: null, headings: [] },
+  branding: { branded_docx_path: null, headings: [], profile: null },
 
   async loadProjects() {
     set({ projects: await apiGet('/projects') })

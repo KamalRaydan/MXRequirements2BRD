@@ -10,7 +10,7 @@ import config
 from agents import analyzer, extractor, generator, summarizer
 from db.database import SessionLocal
 from db.models import PipelineRun, Project, Source
-from services import docx_renderer, structure_extractor
+from services import branding_profile, docx_renderer, structure_extractor
 from services.llm_client import LLMClient, LLMError
 from services.progress_bus import bus
 
@@ -38,6 +38,16 @@ def _load_structure(branded_docx_path: str | None = None) -> list[dict]:
     return template["sections"]
 
 
+def _load_branding(branded_docx_path: str | None) -> dict | None:
+    """The visual branding profile for the renderer, when a reference DOCX is set
+    (spec §18, Milestone 6). Use the stored profile.json if present, otherwise
+    extract it fresh from the reference document."""
+    if not branded_docx_path or not Path(branded_docx_path).exists():
+        return None
+    branding_dir = str(Path(branded_docx_path).parent)
+    return branding_profile.load_profile(branding_dir) or branding_profile.extract_profile(branded_docx_path)
+
+
 def _load_knowledge(maximo_version: str) -> tuple[str, str]:
     """Returns (UI label, knowledge markdown)."""
     maximo_version = config.LEGACY_VERSION_KEYS.get(maximo_version, maximo_version)
@@ -55,6 +65,7 @@ def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str,
         # ---- Pre-flight (spec §12.1) ----
         version_label, knowledge = _load_knowledge(project.maximo_version)
         structure = _load_structure(project.branded_docx_path)
+        branding = _load_branding(project.branded_docx_path)
         llm = LLMClient(api_key=api_key, model_id=model_id, provider=provider)
 
         sources = (
@@ -123,7 +134,8 @@ def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str,
         output_dir = Path(project.folder_path) / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = str(output_dir / f"{run_id}.docx")
-        docx_renderer.render(brd, output_path)
+        docx_renderer.render(brd, output_path,
+                             template_path=project.branded_docx_path, profile=branding)
 
         run.status = "DONE"
         run.output_path = output_path

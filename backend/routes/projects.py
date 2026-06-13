@@ -12,7 +12,7 @@ from db.database import get_db
 from db.models import PipelineRun, Project, Source
 from models.project import ProjectCreate, ProjectOut, RunOut
 from routes import api_error
-from services import structure_extractor
+from services import branding_profile, structure_extractor
 
 router = APIRouter()
 
@@ -146,9 +146,17 @@ async def upload_branding(project_id: str, file: UploadFile, db: Session = Depen
         raise api_error(422, "INVALID_TEMPLATE",
                         f"Could not read headings from this document: {e}")
 
+    # Visual branding (fonts/colours/table style/logo) for the renderer + a UI
+    # "detected branding" summary (Milestone 6). Best-effort: never block upload.
+    try:
+        profile = branding_profile.extract_profile(str(reference), branding_dir=str(branding_dir))
+        branding_profile.save_profile(profile, str(branding_dir))
+    except Exception:
+        profile = None
+
     project.branded_docx_path = str(reference)
     db.commit()
-    return {"branded_docx_path": project.branded_docx_path, "headings": headings}
+    return {"branded_docx_path": project.branded_docx_path, "headings": headings, "profile": profile}
 
 
 @router.get("/projects/{project_id}/branding")
@@ -158,9 +166,11 @@ def get_branding(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise api_error(404, "NOT_FOUND", "Project not found")
     if not project.branded_docx_path or not Path(project.branded_docx_path).exists():
-        return {"branded_docx_path": None, "headings": []}
+        return {"branded_docx_path": None, "headings": [], "profile": None}
     headings = structure_extractor.extract_headings(project.branded_docx_path)
-    return {"branded_docx_path": project.branded_docx_path, "headings": headings}
+    branding_dir = str(Path(project.branded_docx_path).parent)
+    profile = branding_profile.load_profile(branding_dir)
+    return {"branded_docx_path": project.branded_docx_path, "headings": headings, "profile": profile}
 
 
 @router.delete("/projects/{project_id}/branding", status_code=204)
@@ -170,7 +180,9 @@ def delete_branding(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise api_error(404, "NOT_FOUND", "Project not found")
     if project.branded_docx_path:
+        branding_dir = str(Path(project.branded_docx_path).parent)
         Path(project.branded_docx_path).unlink(missing_ok=True)
+        branding_profile.remove_profile(branding_dir)
         project.branded_docx_path = None
         db.commit()
 

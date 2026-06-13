@@ -3,10 +3,19 @@
 Rules: named Word styles only (Heading 1/2/3, Normal, List Bullet, Table Grid),
 requirements as one table per module, DRAFT watermark injected into the page
 header as WordArt XML (so it appears behind every page, not as a text box).
+
+Branding clone (Milestone 6): when a project has a branded reference DOCX we render
+*into a cleared copy of that document* instead of a blank one. Word keeps fonts,
+colours, theme, and the header logo as named styles / separate parts, so adding our
+headings and paragraphs with the same named styles makes them inherit the client's
+look automatically — a high-fidelity clone with no fragile per-run XML surgery. The
+detected table style (from the BrandingProfile) is reused for our tables.
 """
+from pathlib import Path
+
 from docx import Document
 from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
+from docx.oxml.ns import nsdecls, qn
 from docx.shared import Inches
 
 from models.pipeline import BRDDocument, Requirement
@@ -59,15 +68,56 @@ _WATERMARK_XML = (
 
 
 def _add_draft_watermark(document: Document) -> None:
+    # Append the watermark run to the header's first paragraph. In branded mode the
+    # header may already hold the client's logo; the watermark floats (absolute
+    # position) so it overlays without displacing anything already there.
     header = document.sections[0].header
     paragraph = header.paragraphs[0]
     run = paragraph.add_run()
     run._r.append(parse_xml(_WATERMARK_XML))
 
 
-def _add_document_control(document: Document, metadata: dict) -> None:
+def _open_document(template_path: str | None) -> Document:
+    """Blank document, or a cleared copy of the branded template (Milestone 6).
+
+    Opening the reference DOCX inherits all its named styles, theme, and header
+    (logo); we only strip the client's body content, keeping the trailing section
+    properties that point at those headers and define the page layout.
+    """
+    if template_path and Path(template_path).exists():
+        document = Document(template_path)
+        _clear_body(document)
+        return document
+    return Document()
+
+
+def _clear_body(document: Document) -> None:
+    """Remove the template's body paragraphs and tables, keep <w:sectPr>.
+
+    Styles, theme, and headers/footers live in separate package parts and are
+    untouched; the final body-level sectPr carries page size/margins + header refs.
+    """
+    body = document.element.body
+    for child in list(body):
+        if child.tag == qn("w:sectPr"):
+            continue
+        body.remove(child)
+
+
+def _apply_table_style(table, table_style: str) -> None:
+    """Use the detected/branded table style, falling back to Table Grid if the
+    document doesn't define it (best-effort — spec §18)."""
+    for candidate in (table_style, "Table Grid"):
+        try:
+            table.style = candidate
+            return
+        except (KeyError, ValueError):
+            continue
+
+
+def _add_document_control(document: Document, metadata: dict, table_style: str) -> None:
     table = document.add_table(rows=0, cols=2)
-    table.style = "Table Grid"
+    _apply_table_style(table, table_style)
     rows = [
         ("Client", metadata.get("client_name", "")),
         ("Project", metadata.get("project_name", "")),
@@ -81,9 +131,10 @@ def _add_document_control(document: Document, metadata: dict) -> None:
         cells[1].text = str(value)
 
 
-def _add_requirements_table(document: Document, requirements: list[Requirement]) -> None:
+def _add_requirements_table(document: Document, requirements: list[Requirement],
+                            table_style: str) -> None:
     table = document.add_table(rows=1, cols=len(_REQ_COLUMNS))
-    table.style = "Table Grid"
+    _apply_table_style(table, table_style)
 
     for i, (title, ratio) in enumerate(_REQ_COLUMNS):
         table.columns[i].width = Inches(_PAGE_WIDTH_INCHES * ratio)
@@ -98,9 +149,13 @@ def _add_requirements_table(document: Document, requirements: list[Requirement])
             cells[i].text = value
 
 
-def render(brd: BRDDocument, output_path: str) -> str:
-    document = Document()
+def render(brd: BRDDocument, output_path: str,
+           template_path: str | None = None, profile: dict | None = None) -> str:
+    document = _open_document(template_path)
     _add_draft_watermark(document)
+
+    # Reuse the branded document's table style when we detected one (Milestone 6).
+    table_style = (profile or {}).get("table_style") or "Table Grid"
 
     narratives_by_id = {n.section_id: n for n in brd.narratives}
     requirements_by_module: dict[str, list[Requirement]] = {}
@@ -119,11 +174,11 @@ def render(brd: BRDDocument, output_path: str) -> str:
         document.add_heading(section["title"], level=min(section.get("level", 1), 3))
 
         if section_id == "cover":
-            _add_document_control(document, brd.project_metadata)
+            _add_document_control(document, brd.project_metadata, table_style)
         elif section_id == "requirements":
             for module in sorted(requirements_by_module):
                 document.add_heading(module, level=2)
-                _add_requirements_table(document, requirements_by_module[module])
+                _add_requirements_table(document, requirements_by_module[module], table_style)
         elif section_id == "appendix":
             for filename in brd.appendix_sources:
                 document.add_paragraph(filename, style="List Bullet")

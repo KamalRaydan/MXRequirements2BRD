@@ -249,7 +249,7 @@ Milestones 0–5 are complete. Remaining work, per [`docs/implementation-spec.md
 | 3 — Desktop shell | Electron app + macOS DMG, same-origin design, PyInstaller backend | ✅ Complete |
 | 4 — Second provider | OpenAI support (pulled forward into M1) | ✅ Complete |
 | **5 — Media + MAS 8** | `mas-8.md` knowledge + UI enablement; audio/video/image processors (Parakeet ASR with faster-whisper fallback, bundled ffmpeg, provider vision) with `PENDING → TRANSCRIBING → EXTRACTED` | ✅ Complete |
-| **6 — Branding clone** | Extract and apply a client's fonts/logo/table styling to the DOCX | ⏳ Planned |
+| **6 — Branding clone** | Render the BRD into a cleared copy of the client's reference DOCX so it inherits their fonts, colours, table style, and header logo; a "Detected branding" summary in the UI | ✅ Complete |
 | **7 — Ollama** | Local-model provider in `LLMClient` + model-discovery Settings UI | ⏳ Planned |
 | **8 — Windows + polish** | Windows installer (electron-builder + PyInstaller), native file dialogs, onboarding, accessibility, optional code signing | ⏳ Planned |
 

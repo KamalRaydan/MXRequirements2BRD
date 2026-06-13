@@ -2,7 +2,7 @@
 
 This document is everything needed to implement the project without referring back to `docs/blueprint.md`. It resolves ambiguities, defines schemas and API contracts, specifies prompts, and lays out a milestone plan that produces a **working application within the first two weeks** and grows it — without rework — into the full desktop product.
 
-**Status:** Milestone 5 complete — media sources (audio/video/image) are processed on upload: local ASR (Parakeet, faster-whisper fallback) for recordings, provider vision for images; MAS 8 knowledge authored and enabled. Milestones 0–4 already shipped the desktop app (Electron + macOS DMG) with Anthropic + OpenAI providers
+**Status:** Milestone 6 complete — the BRD now clones a client's visual branding (fonts, colours, table style, header logo) by rendering into a cleared copy of their reference DOCX. Milestone 5 added media sources (local ASR for audio/video, provider vision for images) + MAS 8; Milestones 0–4 shipped the desktop app (Electron + macOS DMG) with Anthropic + OpenAI providers
 **Platform:** macOS shipping (DMG); backend is cross-platform so Windows packaging is a build-on-Windows follow-up
 **MVP shape:** Local web app — Python FastAPI backend + React frontend in the browser at `localhost`
 **Target shape:** Same backend + same frontend wrapped in an Electron desktop shell (Milestone 3 ✅)
@@ -74,7 +74,7 @@ The previous revision of this spec front-loaded Electron, dual AI providers, and
 | Branded DOCX → heading-structure extraction | `StructureExtractor` | Milestone 2 ✅ |
 | Audio/video/image processing (local ASR, ffmpeg, vision) | `UPLOADED → TRANSCRIBING → EXTRACTED` | Milestone 5 ✅ |
 | MAS 8.x knowledge + enablement | `mas-8.md` | Milestone 5 ✅ |
-| Visual branding clone (fonts/logo/tables) | `BrandingProfile` | Milestone 6 |
+| Visual branding clone (fonts/logo/tables) | `BrandingProfile` + render-into-template | Milestone 6 ✅ |
 | Ollama local models | `OllamaProvider` | Milestone 7 |
 | Windows build, signing, onboarding polish | electron-builder + PyInstaller | Milestone 8 |
 | Alembic migrations | Introduce once schema churn matters (still no churn through M3 — `create_all()` remains sufficient) | Later, if needed |
@@ -194,6 +194,7 @@ maximobrd/
 │   │   ├── progress_bus.py
 │   │   ├── keystore.py               (macOS Keychain wrapper via keyring)
 │   │   ├── structure_extractor.py    (branded-template heading extraction)
+│   │   ├── branding_profile.py       (visual branding: fonts/colour/table style/logo — M6)
 │   │   └── asr.py                    (local speech-to-text: Parakeet → faster-whisper, M5)
 │   ├── agents/
 │   │   ├── runner.py                 (pipeline orchestrator — BackgroundTask entry point)
@@ -230,6 +231,7 @@ maximobrd/
 │   │   ├── test_settings.py
 │   │   ├── test_structure_extractor.py
 │   │   ├── test_branding.py
+│   │   ├── test_branding_profile.py   (M6 — visual branding extraction)
 │   │   ├── test_filedates.py
 │   │   ├── test_media_processors.py  (M5 — ASR/vision mocked, ffmpeg real)
 │   │   └── test_pipeline_integration.py
@@ -794,7 +796,7 @@ Each narrative section must reference relevant modules and highlight version-spe
 4. Appendix: bullet list of source filenames.
 5. Save to `{folder}/output/{run_id}.docx`.
 
-Named Word styles only — no inline fonts (visual branding clone is Milestone 6).
+Named Word styles only — no inline fonts. When the project has a branded reference DOCX, the renderer instead opens a cleared copy of that document so its named styles, theme, header logo, and table style carry over natively (Milestone 6); see §18 Milestone 6.
 
 ### 12.7 LLMClient (`services/llm_client.py`)
 
@@ -1002,6 +1004,8 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 | `llm_client.py` | retry logic (mocked) | ✅ `test_llm_client.py` |
 | `structure_extractor.py` | heading hierarchy order, canonical id mapping | ✅ `test_structure_extractor.py` |
 | `processors/filedates.py` | PDF date-string parsing (offsets/partials), DOCX/XLSX core properties, unreadable file → None | ✅ `test_filedates.py` |
+| `branding_profile.py` | fonts/colour/table-style/logo extraction; logo vs thumbnail; save/load/remove | ✅ `test_branding_profile.py` |
+| `docx_renderer.py` (branded) | render into template clones styles + header logo; unknown table style falls back | ✅ `test_docx_renderer.py` |
 
 ### 17.2 Integration tests
 
@@ -1104,9 +1108,18 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 
 **Done when:** a recording or photo uploaded to the app becomes EXTRACTED text that flows into the BRD. *(Met — real Parakeet transcription verified in dev and in the frozen bundle; 55 backend tests passing.)*
 
-### Milestone 6 — Branding clone (2–3 weeks)
+### Milestone 6 — Branding clone ✅ Complete
 
-- [ ] `BrandingProfile` extraction + storage; renderer applies fonts/logo/table XML (best-effort)
+**Design decision (user, 2026-06-13):** clone the client's *look* by **rendering the BRD into a cleared copy of the reference DOCX** rather than re-applying extracted style values to a blank document. Word stores fonts, colours, theme, header logo, and table styles as named styles / separate package parts, so writing our headings and tables with the same named styles makes them inherit the client's identity natively — the highest-fidelity clone with the least fragile XML. A small `BrandingProfile` is still extracted and stored for the renderer's table-style choice and a UI "detected branding" summary.
+
+- [x] `services/branding_profile.py` — extracts body/heading fonts + sizes, heading colour, table style, and the header/embedded logo (under `/word/media/`, ignoring the auto-generated `docProps/thumbnail.jpeg`); saves `branding/profile.json` + `branding/logo.*`. All fields best-effort (theme-inherited fonts/colours are legitimately `None`).
+- [x] `docx_renderer.render(brd, out, template_path=, profile=)` opens the reference DOCX, clears its body (keeping `<w:sectPr>`, styles, theme, header logo), injects the DRAFT watermark over the existing header, and reuses the detected table style (falling back to `Table Grid`).
+- [x] Pipeline pre-flight loads the profile (stored JSON, else freshly extracted) and passes `template_path` + `profile` to the renderer; blank-document path unchanged when no template is set.
+- [x] Branding routes return/persist/remove the profile alongside the heading preview; upload never fails on profile extraction (guarded).
+- [x] Frontend: "Detected branding" summary (fonts, heading-colour swatch, table style, logo found) under the heading preview in ProjectDetail.
+- [x] Tests: `test_branding_profile.py` (extraction, logo vs thumbnail, save/load/remove round-trip) + template-render clone test in `test_docx_renderer.py` + profile assertions in `test_branding.py`.
+
+**Done when:** a BRD generated for a project with a branded template visually matches that template's fonts, colours, table style, and logo. *(Met — 66 backend tests passing; verified the rendered branded doc inherits the template's heading font/colour and header logo with a well-formed single-section body.)*
 
 ### Milestone 7 — Ollama (1–2 weeks)
 
@@ -1160,7 +1173,7 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 | Question | Answer |
 |----------|--------|
 | Is anything working now? | Yes — Milestones 0–5 complete: a double-click macOS desktop app (DMG) that produces a real BRD from documents, recordings (transcribed locally with Parakeet), and images (provider vision), with cancel mid-run, branded templates, timestamp overrides, and structured error handling — no terminal, no Python install |
-| What's next? | Milestone 6: visual branding clone (fonts/logo/tables from the client's reference DOCX). (Windows packaging and native dialogs are tracked for Milestone 8.) |
+| What's next? | Milestone 7: Ollama local-model provider. (Windows packaging and native dialogs are tracked for Milestone 8.) |
 | Did the MVP lock us in? | No — backend, API, schema, and UI carried into Electron **unchanged**; the desktop shell is a thin same-origin wrapper that only spawns and health-gates the backend |
 | What was deferred, and where did it go? | Every deferred item has a named milestone in §3.2 / §18; safeStorage and the per-project DB split were consciously declined/deferred (kept `keyring` and a single `app.db`) — nothing from the blueprint was dropped |
 | What's still content work? | Full Maximo knowledge files (structure defined in §7.3; prose must be authored before real client use) |
