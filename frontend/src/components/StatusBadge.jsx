@@ -5,6 +5,10 @@ const STYLES = {
   PENDING: 'bg-slate-200 text-slate-600',
   ERROR: 'bg-red-100 text-red-800',
   UPLOADED: 'bg-slate-200 text-slate-600',
+  // Generation run statuses (Run History) — same pill treatment as source statuses
+  RUNNING: 'bg-amber-100 text-amber-800',
+  DONE: 'bg-green-100 text-green-800',
+  FAILED: 'bg-red-100 text-red-800',
 }
 
 const LABELS = {
@@ -14,6 +18,9 @@ const LABELS = {
   PENDING: 'Pending',
   ERROR: 'Error',
   UPLOADED: 'Uploaded',
+  RUNNING: 'Running…',
+  DONE: 'Done',
+  FAILED: 'Failed',
 }
 
 // All media share the TRANSCRIBING status, but only audio/video are transcribed —

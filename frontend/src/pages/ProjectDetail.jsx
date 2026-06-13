@@ -66,7 +66,7 @@ export default function ProjectDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const {
-    current, sources, runs, branding, loadProject, refreshSources, uploadFiles,
+    current, sources, runs, branding, loadProject, refreshSources, refreshRuns, uploadFiles,
     deleteSource, processSource, setSourceDate, refreshDates, setBranding, removeBranding,
   } = useProjectStore()
   const { configured, loaded, load } = useSettingsStore()
@@ -96,6 +96,15 @@ export default function ProjectDetail() {
     const timer = setInterval(() => refreshSources(id), 2000)
     return () => clearInterval(timer)
   }, [processing, id])
+
+  // While a generation run is in progress, refresh the run list every 3s so its
+  // status flips to DONE/FAILED here without a manual reload.
+  const runInProgress = runs.some((r) => r.status === 'RUNNING')
+  useEffect(() => {
+    if (!runInProgress) return
+    const timer = setInterval(() => refreshRuns(id), 3000)
+    return () => clearInterval(timer)
+  }, [runInProgress, id])
 
   async function handleFiles(files) {
     if (!files?.length) return
@@ -191,7 +200,7 @@ export default function ProjectDetail() {
         {sources.length > 0 && (
           <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-2">File</th>
                   <th className="px-4 py-2">Size</th>
@@ -289,9 +298,8 @@ export default function ProjectDetail() {
         {sources.length > 0 && (
           <div className="mt-2 flex items-start justify-between gap-4">
             <p className="text-xs text-slate-400">
-              Effective dates are read from inside PDF, Word, and Excel files when available.
-              Plain-text and media files have no embedded date — use Edit date to correct them,
-              or upload them in the order they were written.
+              Dates are read from PDF, Word, and Excel files automatically. For text and
+              media files, use Edit date to set them manually.
             </p>
             <button
               onClick={handleRefreshDates}
@@ -368,7 +376,7 @@ export default function ProjectDetail() {
             </p>
           </div>
           <button
-            onClick={() => navigate(`/projects/${id}/generate`)}
+            onClick={() => navigate(`/projects/${id}/generate?start=1`)}
             disabled={!canGenerate}
             className="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
           >
@@ -383,29 +391,37 @@ export default function ProjectDetail() {
           <h2 className="mb-3 text-base font-semibold">Run History</h2>
           <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-500">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-2">Started</th>
-                  <th className="px-4 py-2">Status</th>
-                  <th className="px-4 py-2">Sources used</th>
+                  <th className="whitespace-nowrap px-4 py-2">Started</th>
+                  <th className="whitespace-nowrap px-4 py-2">Status</th>
+                  <th className="whitespace-nowrap px-4 py-2">Sources used</th>
+                  <th className="whitespace-nowrap px-4 py-2">Remarks</th>
                   <th className="px-4 py-2"></th>
                 </tr>
               </thead>
               <tbody>
                 {runs.map((r) => (
                   <tr key={r.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-4 py-2">{new Date(r.started_at).toLocaleString()}</td>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-700">{new Date(r.started_at).toLocaleString()}</td>
                     <td className="px-4 py-2">
-                      <span className={
-                        r.status === 'DONE' ? 'text-green-700' :
-                        r.status === 'FAILED' ? 'text-red-600' : 'text-amber-600'
-                      }>
-                        {r.status}
-                      </span>
-                      {r.error_message && <span className="ml-2 text-xs text-slate-400">{r.error_message}</span>}
+                      <StatusBadge status={r.status} />
                     </td>
                     <td className="px-4 py-2 text-slate-500">{r.sources_used_count}</td>
+                    <td className="px-4 py-2 text-sm text-slate-500">
+                      <span className="line-clamp-2" title={r.error_message || undefined}>
+                        {r.error_message || '—'}
+                      </span>
+                    </td>
                     <td className="px-4 py-2 text-right">
+                      {r.status === 'RUNNING' && (
+                        <button
+                          onClick={() => navigate(`/projects/${id}/generate?run=${r.id}`)}
+                          className="text-xs font-medium text-blue-600 hover:underline"
+                        >
+                          View progress
+                        </button>
+                      )}
                       {r.status === 'DONE' && (
                         <a href={downloadUrl(r.id)} className="text-xs font-medium text-blue-600 hover:underline">
                           Download

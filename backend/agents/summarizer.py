@@ -8,7 +8,7 @@ def _load_prompt() -> str:
     return (config.PROMPTS_DIR / "summarizer.txt").read_text(encoding="utf-8")
 
 
-def summarize_if_needed(llm: LLMClient, source: ExtractedSource) -> SummarizedSource:
+def summarize_if_needed(llm: LLMClient, source: ExtractedSource, on_progress=None) -> SummarizedSource:
     if source.char_count <= config.TOKEN_THRESHOLD:
         return SummarizedSource(
             source_id=source.source_id,
@@ -25,6 +25,7 @@ def summarize_if_needed(llm: LLMClient, source: ExtractedSource) -> SummarizedSo
     summary = llm.complete(
         messages=[{"role": "user", "content": f"{prompt}\n\nSOURCE MATERIAL:\n{source.raw_text}"}],
         max_tokens=config.LLM_MAX_TOKENS_SUMMARIZE,
+        on_progress=on_progress,
     )
     return SummarizedSource(
         source_id=source.source_id,

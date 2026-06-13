@@ -1127,7 +1127,26 @@ Milestone 3 scripts: `dev:electron` runs the desktop shell against the dev venv 
 
 ### Milestone 8 — Windows + polish (2–3 weeks)
 
-- [ ] Windows electron-builder + PyInstaller; onboarding flow, accessibility pass, optional code signing
+**Background:** The Python backend is already cross-platform — `config.py` resolves `%APPDATA%` on Windows, `keyring` uses Windows Credential Locker automatically, and `electron/package.json` already declares a `win: { target: ["nsis"] }` build target. Three targeted code changes plus a `start.bat` unblock Windows in dev mode; a packaged installer additionally requires running PyInstaller on a Windows machine (no cross-compilation from macOS).
+
+**Dev mode (running from the repo on Windows):**
+
+- [ ] Add `start.bat` / `start.ps1` parallel to `start.sh` — same version checks + setup + launch, using Windows paths (`.venv\Scripts\python`, `npm run app`)
+- [ ] Fix root `package.json` npm scripts to use Windows-compatible venv paths — `dev:backend`, `test:backend`, and `build:backend` all hardcode `.venv/bin/` (Unix only); use `cross-env` or a wrapper to emit `.venv\Scripts\` on `win32`
+- [ ] Fix `services/asr.py` `ensure_ffmpeg_on_path()` — replace `link.symlink_to()` with `shutil.copy2()` on `win32`; Windows symlinks require Developer Mode or admin rights and will silently fail otherwise
+
+**Packaged installer:**
+
+- [ ] Build PyInstaller backend **on a Windows machine** or `windows-latest` CI runner — produces `backend/dist/maximobrd-backend.exe`; PyInstaller cannot cross-compile from macOS
+- [ ] In `electron/main.js`, append `.exe` to the bundled backend binary path when `process.platform === "win32"`; use `.venv\Scripts\python.exe` for the `dev:electron` path
+- [ ] Add `build:win` script to root `package.json` (`npm run build:backend && cd electron && npm run dist -- --win`) and run on Windows to produce the NSIS `.exe` installer
+- [ ] Smoke-test the NSIS installer end-to-end on Windows: install, first-run Windows Credential Locker prompt, generate a BRD, uninstall
+
+**Polish (shared):**
+
+- [ ] Onboarding flow: first-run users who open the app without an API key configured are guided to Settings before they can create a project
+- [ ] Accessibility pass: keyboard navigation, ARIA labels on status badges and modals, focus management on dialogs
+- [ ] Optional code signing — Windows Authenticode and/or macOS Developer ID eliminates SmartScreen / Gatekeeper warnings; required before any public distribution
 
 ---
 

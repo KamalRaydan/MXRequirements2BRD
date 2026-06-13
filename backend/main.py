@@ -2,6 +2,7 @@
     uvicorn main:app --reload --port 8765 --host 127.0.0.1
 """
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -11,13 +12,33 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
-from db.database import init_db
+from db.database import SessionLocal, init_db
 from routes import pipeline, projects, settings, sources
+
+
+def _fail_orphaned_runs() -> None:
+    """Pipeline progress lives in an in-memory bus, so a run left RUNNING when the
+    process stopped can never resume or stream. Mark those as FAILED on startup so
+    they don't sit "stuck" forever in the UI."""
+    from db.models import PipelineRun
+
+    db = SessionLocal()
+    try:
+        orphaned = db.query(PipelineRun).filter(PipelineRun.status == "RUNNING").all()
+        for run in orphaned:
+            run.status = "FAILED"
+            run.error_message = "Generation was interrupted (the app restarted). Please try again."
+            run.completed_at = datetime.now(timezone.utc)
+        if orphaned:
+            db.commit()
+    finally:
+        db.close()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    _fail_orphaned_runs()
     yield
 
 

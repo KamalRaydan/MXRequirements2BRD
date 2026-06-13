@@ -16,13 +16,14 @@ from services.progress_bus import bus
 class FakeLLM:
     """Stands in for LLMClient — returns canned, schema-valid responses."""
 
-    def __init__(self, api_key, model_id, provider="anthropic"):
+    def __init__(self, api_key, model_id, provider="anthropic", timeout=None):
         pass
 
-    def complete(self, messages, max_tokens=4096, system=None):
+    def complete(self, messages, max_tokens=4096, system=None, on_progress=None):
         return "summary text"
 
-    def complete_json(self, messages, schema, max_tokens=8192, system=None):
+    def complete_json(self, messages, schema, max_tokens=8192, system=None,
+                      on_progress=None, cache_system=False):
         if schema is AnalysisDraft:
             return AnalysisDraft(
                 requirements=[RequirementDraft(

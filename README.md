@@ -2,7 +2,7 @@
 
 > Turn raw requirement documents into a polished, traceable Business Requirements Document (BRD) for IBM Maximo engagements — locally, on your own machine.
 
-**Status:** Milestones 0–5 complete. Ships today as a double-click **macOS desktop app** (DMG) — no terminal, no Python install. The same app also runs in a browser for development.
+**Status:** Milestones 0–6 complete. Ships today as a double-click **macOS desktop app** (DMG) — no terminal, no Python install. The same app also runs in a browser for development.
 
 ---
 
@@ -218,13 +218,21 @@ Sensible defaults; override via environment variables (see `backend/config.py`).
 
 Ideas that build on the current foundation.
 
-### 1. Run the desktop app on Windows
-The architecture is already cross-platform (the backend resolves `%APPDATA%`, and `keyring` uses Windows Credential Locker automatically), and an NSIS `.exe` target is configured in `electron/package.json`. To ship a Windows build:
-- Build the backend with PyInstaller **on a Windows machine** (or a `windows-latest` CI runner) — it cannot be cross-compiled from macOS; this produces `maximobrd-backend.exe`.
-- Append `.exe` to the bundled backend path in `electron/main.js` when running on `win32`, and use `.venv\Scripts\python.exe` for the dev path.
-- Add a `build:win` script (`electron-builder --win`) and run it on Windows.
+### 1. Run the desktop app on Windows *(Milestone 8)*
 
-> This is the formal Milestone 8 deliverable. An interim alternative is to ship the PyInstaller `maximobrd-backend.exe` alone and open `127.0.0.1:<port>` in a browser — simpler, but it loses the native window, icon, and clean install/quit.
+The backend is already cross-platform — `config.py` resolves `%APPDATA%`, `keyring` uses Windows Credential Locker automatically, and `electron/package.json` already declares an NSIS `.exe` build target. Three targeted code changes plus a `start.bat` unblock Windows in dev mode; a packaged installer requires building on a Windows machine.
+
+**Code changes needed (dev mode):**
+- `start.bat` / `start.ps1` parallel to `start.sh`
+- Root `package.json` scripts use `.venv/bin/` (Unix only) — needs `.venv\Scripts\` on Windows
+- `services/asr.py` creates a symlink to expose the bundled ffmpeg binary; Windows symlinks require Developer Mode or admin rights — replace with `shutil.copy2()` on `win32`
+
+**Packaged installer:**
+- Build PyInstaller backend **on a Windows machine** (or `windows-latest` CI runner) — cannot cross-compile from macOS; this produces `maximobrd-backend.exe`
+- Append `.exe` to the bundled backend path in `electron/main.js` on `win32`
+- Add a `build:win` script and run it on Windows to produce the NSIS `.exe` installer
+
+> See `docs/implementation-spec.md` §18 Milestone 8 for the full checklist.
 
 ### 2. Dark mode
 The UI already uses Tailwind. Add a theme toggle (Tailwind's `dark:` variant + a Zustand-held theme flag, applied as a `class` on `<html>`). Keep it in app state per the no-`localStorage` rule, or persist a single preference server-side via Settings.
@@ -251,7 +259,7 @@ Milestones 0–5 are complete. Remaining work, per [`docs/implementation-spec.md
 | **5 — Media + MAS 8** | `mas-8.md` knowledge + UI enablement; audio/video/image processors (Parakeet ASR with faster-whisper fallback, bundled ffmpeg, provider vision) with `PENDING → TRANSCRIBING → EXTRACTED` | ✅ Complete |
 | **6 — Branding clone** | Render the BRD into a cleared copy of the client's reference DOCX so it inherits their fonts, colours, table style, and header logo; a "Detected branding" summary in the UI | ✅ Complete |
 | **7 — Ollama** | Local-model provider in `LLMClient` + model-discovery Settings UI | ⏳ Planned |
-| **8 — Windows + polish** | Windows installer (electron-builder + PyInstaller), native file dialogs, onboarding, accessibility, optional code signing | ⏳ Planned |
+| **8 — Windows + polish** | `start.bat`/`start.ps1`, fix npm venv paths, fix ffmpeg symlink → copy on win32, PyInstaller on Windows, `build:win` script, NSIS `.exe` installer; onboarding flow, accessibility pass, optional code signing | ⏳ Planned |
 
 ---
 

@@ -37,6 +37,10 @@ export const useProjectStore = create((set, get) => ({
     set({ sources: await apiGet(`/projects/${id}/sources`) })
   },
 
+  async refreshRuns(id) {
+    set({ runs: await apiGet(`/projects/${id}/runs`) })
+  },
+
   async uploadFiles(projectId, files) {
     for (const file of files) {
       await uploadSource(projectId, file)

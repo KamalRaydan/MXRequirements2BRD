@@ -13,6 +13,7 @@ def generate(
     structure: list[dict],
     appendix_sources: list[str],
     maximo_knowledge: str,
+    on_progress=None,
 ) -> BRDDocument:
     system = (config.PROMPTS_DIR / "generator_system.txt").read_text(encoding="utf-8").format(
         maximo_knowledge=maximo_knowledge,
@@ -28,6 +29,7 @@ def generate(
         schema=NarrativeSet,
         max_tokens=config.LLM_MAX_TOKENS_GENERATE,
         system=system,
+        on_progress=on_progress,
     )
 
     return BRDDocument(

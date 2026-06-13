@@ -24,8 +24,20 @@ TOKEN_THRESHOLD = int(os.environ.get("TOKEN_THRESHOLD", "12000"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
 
 LLM_MAX_TOKENS_SUMMARIZE = int(os.environ.get("LLM_MAX_TOKENS_SUMMARIZE", "4096"))
-LLM_MAX_TOKENS_ANALYZE = int(os.environ.get("LLM_MAX_TOKENS_ANALYZE", "8192"))
-LLM_MAX_TOKENS_GENERATE = int(os.environ.get("LLM_MAX_TOKENS_GENERATE", "8192"))
+LLM_MAX_TOKENS_ANALYZE = int(os.environ.get("LLM_MAX_TOKENS_ANALYZE", "16000"))
+LLM_MAX_TOKENS_GENERATE = int(os.environ.get("LLM_MAX_TOKENS_GENERATE", "16000"))
+
+# Analysis is map-reduce: sources are extracted in batches so one giant call can't
+# overflow the output-token limit (and to avoid "lost in the middle" accuracy loss
+# on huge single contexts). Each batch holds up to this many characters of source
+# text; results are merged and de-duplicated afterwards.
+ANALYZE_BATCH_CHARS = int(os.environ.get("ANALYZE_BATCH_CHARS", "12000"))
+
+# Fail-fast timeout for a single AI call (seconds). Because the long calls stream,
+# this acts as a "no bytes received for N seconds" stall detector — a healthy call
+# that keeps streaming tokens stays alive, but a genuinely hung request errors out
+# quickly instead of silently blocking for the SDK's ~10-minute default.
+LLM_TIMEOUT_SECONDS = float(os.environ.get("LLM_TIMEOUT_SECONDS", "240"))
 
 # app.db lives in the OS-specific application-data dir. Cross-platform so the same
 # backend runs under the Electron shell on macOS, Windows, and Linux (the keyring

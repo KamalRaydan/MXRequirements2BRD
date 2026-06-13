@@ -6,6 +6,7 @@ const initial = {
   status: 'idle', // idle | running | cancelling | done | failed | cancelled
   percent: 0,
   stage: null,
+  startedAt: null, // ISO time the run kicked off, shown on the Generate page
   messages: [], // last few progress messages
   outputPath: null,
   errorMessage: null,
@@ -23,9 +24,17 @@ export const usePipelineStore = create((set, get) => ({
   async start(projectId) {
     get().reset()
     const { run_id } = await apiPost(`/projects/${projectId}/generate`)
-    set({ runId: run_id, status: 'running', percent: 0 })
+    set({ runId: run_id, status: 'running', percent: 0, startedAt: new Date().toISOString() })
     get().attach(run_id)
     return run_id
+  },
+
+  // Reattach to an already-running (or finished) run without starting a new one.
+  // The server replays this run's events over SSE, so the log repopulates.
+  resume(runId) {
+    get().reset()
+    set({ runId, status: 'running', percent: 0 })
+    get().attach(runId)
   },
 
   attach(runId) {

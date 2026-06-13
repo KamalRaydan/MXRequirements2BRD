@@ -25,6 +25,15 @@ def _progress(run_id: str, stage: str, message: str, percent: int, step: str | N
     })
 
 
+def _heartbeat(run_id: str, stage: str, message: str, percent: int, step: str | None = None):
+    """Build an on_progress(chars) callback for the long streaming AI calls. It
+    republishes a live character count so the UI keeps moving instead of looking
+    frozen while a single multi-minute call is in flight."""
+    def cb(chars: int) -> None:
+        _progress(run_id, stage, f"{message} ({chars:,} characters so far…)", percent, step=step)
+    return cb
+
+
 def _check_cancel(run_id: str) -> None:
     if bus.is_cancel_requested(run_id):
         raise PipelineCancelled()
@@ -97,13 +106,23 @@ def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str,
         for i, ext in enumerate(extracted):
             _check_cancel(run_id)
             percent = 30 + int(25 * (i + 1) / len(extracted))
+            heartbeat = None
             if ext.char_count > config.TOKEN_THRESHOLD:
                 _progress(run_id, "analysis", f"Summarizing {ext.filename}", percent, step="summarizing")
-            summarized.append(summarizer.summarize_if_needed(llm, ext))
+                heartbeat = _heartbeat(run_id, "analysis", f"Summarizing {ext.filename}",
+                                       percent, step="summarizing")
+            summarized.append(summarizer.summarize_if_needed(llm, ext, on_progress=heartbeat))
 
         # ---- Stage 2b: analysis (55–75%) ----
         _check_cancel(run_id)
         _progress(run_id, "analysis", "Extracting requirements from sources", 60, step="extracting")
+
+        def _analysis_batch(done: int, total: int, label: str) -> None:
+            # spread batch completions across 60–73% so the bar climbs per batch
+            pct = 60 + int(13 * done / total)
+            _progress(run_id, "analysis", f"Analyzed batch {done} of {total} ({label})",
+                      pct, step="extracting")
+
         analysis = analyzer.analyze(
             llm, summarized,
             project_name=project.project_name,
@@ -111,6 +130,9 @@ def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str,
             maximo_version_label=version_label,
             maximo_knowledge=knowledge,
             section_titles=[s["title"] for s in structure],
+            on_progress=_heartbeat(run_id, "analysis", "Extracting requirements from sources",
+                                   65, step="extracting"),
+            on_batch=_analysis_batch,
         )
         _progress(run_id, "analysis",
                   f"Identified {len(analysis.requirements)} requirements", 75, step="extracting")
@@ -126,7 +148,10 @@ def run_pipeline(run_id: str, project_id: str, api_key: str, model_id: str,
             "maximo_version_label": version_label,
         }
         appendix = sorted({s.filename for s in summarized})
-        brd = generator.generate(llm, analysis, metadata, structure, appendix, knowledge)
+        brd = generator.generate(
+            llm, analysis, metadata, structure, appendix, knowledge,
+            on_progress=_heartbeat(run_id, "generation", "Writing BRD narrative sections", 85),
+        )
 
         # ---- Stage 3b: render (90–100%) ----
         _check_cancel(run_id)

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { downloadUrl } from '../api'
 import { usePipelineStore } from '../store/pipelineStore'
 
@@ -14,13 +14,28 @@ const STAGE_ORDER = ['extraction', 'analysis', 'generation', 'rendering', 'done'
 
 export default function Generate() {
   const { id } = useParams()
-  const { runId, status, percent, stage, messages, errorMessage, start, reset, cancel } = usePipelineStore()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { runId, status, percent, stage, startedAt, messages, errorMessage, start, resume, reset, cancel } = usePipelineStore()
+
+  const startRun = () =>
+    start(id).catch((e) => usePipelineStore.setState({ status: 'failed', errorMessage: e.message }))
 
   useEffect(() => {
-    if (status === 'idle') {
-      start(id).catch((e) => usePipelineStore.setState({ status: 'failed', errorMessage: e.message }))
+    // A run is already attached in this session (e.g. navigated back) — keep its stream.
+    if (status !== 'idle') return
+
+    // Reconnect to a running/finished run when arriving from the project page.
+    const resumeId = searchParams.get('run')
+    if (resumeId) {
+      resume(resumeId)
+      return
     }
-    // Keep the stream attached if the user navigates back here mid-run
+    // Only start a brand-new run on explicit intent (the Generate button adds ?start).
+    // A bare reload lands on the idle panel instead of silently launching a second run.
+    if (searchParams.get('start')) {
+      startRun()
+      setSearchParams({}, { replace: true })
+    }
   }, [])
 
   const stageIndex = STAGE_ORDER.indexOf(status === 'done' ? 'done' : stage)
@@ -35,7 +50,11 @@ export default function Generate() {
   return (
     <div className="mx-auto max-w-2xl">
       <Link to={`/projects/${id}`} className="text-sm text-slate-500 hover:text-slate-900">← Back to project</Link>
-      <h1 className="mt-1 mb-6 text-xl font-semibold">Generating BRD</h1>
+      <h1 className="mt-1 text-xl font-semibold">Generating BRD</h1>
+      {startedAt && (
+        <p className="mb-6 text-sm text-slate-500">Run started {new Date(startedAt).toLocaleString()}</p>
+      )}
+      {!startedAt && <div className="mb-6" />}
 
       {/* Progress bar */}
       <div className="mb-6 h-3 w-full overflow-hidden rounded-full bg-slate-200">
@@ -80,6 +99,28 @@ export default function Generate() {
             >
               {status === 'cancelling' ? 'Cancelling…' : 'Cancel'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {status === 'idle' && (
+        <div className="rounded-lg border border-slate-200 bg-white p-6 text-center">
+          <p className="mb-4 text-sm text-slate-600">
+            No generation is running. If you started one earlier, return to the project to view its progress.
+          </p>
+          <div className="flex justify-center gap-3">
+            <button
+              onClick={startRun}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Start generation
+            </button>
+            <Link
+              to={`/projects/${id}`}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
+            >
+              Back to project
+            </Link>
           </div>
         </div>
       )}
