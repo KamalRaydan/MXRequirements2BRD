@@ -2,7 +2,7 @@
 
 > Turn raw requirement documents into a polished, traceable Business Requirements Document (BRD) for IBM Maximo engagements — locally, on your own machine.
 
-**Status:** Milestones 0–4 complete. Ships today as a double-click **macOS desktop app** (DMG) — no terminal, no Python install. The same app also runs in a browser for development.
+**Status:** Milestones 0–5 complete. Ships today as a double-click **macOS desktop app** (DMG) — no terminal, no Python install. The same app also runs in a browser for development.
 
 ---
 
@@ -11,11 +11,11 @@
 MaximoBRD is a local-first tool for IBM Maximo consultants. You:
 
 1. **Create a project** — client, name, date, Maximo version, and where the files live.
-2. **Upload requirement artifacts** — PDF, DOCX, TXT/MD, XLSX (audio/video/images are accepted but processed in a later release).
+2. **Upload requirement artifacts** — PDF, DOCX, TXT/MD, XLSX, plus **audio, video, and images**. Audio and video are transcribed on-device; images are read via your AI provider's vision endpoint.
 3. **Click Generate** — a 3-stage AI pipeline (extract → analyze → generate) reads your documents and drafts the BRD.
 4. **Download a DOCX** — a DRAFT-watermarked Word document with traceable requirement IDs (`BRD-{MODULE}-{NNN}`) and source citations.
 
-Everything runs on your machine. Your documents and API keys never leave it except for the **extracted text** sent to your chosen AI provider.
+Everything runs on your machine. Your documents and API keys never leave it except for the **extracted text** sent to your chosen AI provider — and, for image sources, the **image itself**, which is sent to that provider's vision endpoint for reading. Audio and video are transcribed locally and never uploaded.
 
 ---
 
@@ -57,6 +57,7 @@ The desktop app is a thin shell: it picks a free port, starts the Python backend
 | Backend | Python, FastAPI, SQLAlchemy (sync), SQLite |
 | AI | Anthropic Claude (`claude-sonnet-4-6` default) and OpenAI (`gpt-4o` default), user-selectable |
 | Documents | `python-docx`, PyMuPDF, openpyxl |
+| Media | bundled ffmpeg (`imageio-ffmpeg`) + on-device speech-to-text — Parakeet (`parakeet-mlx`, Apple Silicon) with `faster-whisper` fallback; images via provider vision |
 | Secrets | `keyring` (OS credential store) |
 | Desktop | Electron + electron-builder, PyInstaller |
 
@@ -162,7 +163,7 @@ This builds the frontend, freezes the backend with PyInstaller, then packages ev
 ## Testing
 
 ```bash
-npm run test:backend   # pytest — processors, ID assignment, DOCX render, pipeline, etc.
+npm run test:backend   # pytest (55 tests) — processors, media extractors, ID assignment, DOCX render, pipeline, etc.
 ```
 
 ---
@@ -207,7 +208,8 @@ Sensible defaults; override via environment variables (see `backend/config.py`).
 
 - **API keys** are stored only in the OS credential store via `keyring` — never in the database, logs, code, or `.env`.
 - The backend binds to **`127.0.0.1` only** — it is not reachable from the network.
-- Only **extracted text** is sent to AI providers — never raw audio, video, or binary files.
+- Audio and video are **transcribed on-device** — raw audio/video never leaves your machine.
+- For text documents, only the **extracted text** is sent to AI providers. The one exception is **image sources**: the image itself is sent to your chosen provider's vision endpoint to be read (OCR + description), and only the returned text enters the pipeline.
 - Maximo version facts live in `knowledge/versions/*.md` and are injected at runtime, keeping the codebase free of hardcoded product claims.
 
 ---
@@ -230,10 +232,7 @@ The UI already uses Tailwind. Add a theme toggle (Tailwind's `dark:` variant + a
 ### 3. Friendlier "Test Connection" error messages
 Today a failed connection test surfaces the raw provider error. Map common failures to plain guidance in `services/llm_client.py` / the settings route — e.g. *"That API key was rejected — check it's the right provider and hasn't expired"* for a 401, *"You've hit your provider's rate limit, try again shortly"* for a 429, and *"Couldn't reach the provider — check your internet connection"* for a network error.
 
-### 4. Simpler Maximo version selection
-The picker currently lists `Maximo 7.6.0.x` and `Maximo 7.6.1.x` separately. Collapse these into a single **Maximo 7.6** option, leaving three clear choices: **Maximo 7.6**, **MAS 8.x**, and **MAS 9.x**. This is a small change to `VERSION_MAP` in `backend/config.py` and the version list in `frontend/src/pages/ProjectList.jsx` (both 7.6 entries already point at the same `maximo-76.md` knowledge file). *(MAS 8.x ships its knowledge file and is enabled in Milestone 5.)*
-
-### 5. Let the user choose where project files are saved
+### 4. Let the user choose where project files are saved
 The New Project modal pre-fills the folder path from `PROJECTS_DEFAULT_DIR` (`~/MaximoBRD`) as editable text. Improve this with a real folder picker:
 - **Browser:** the File System Access API directory picker (where supported).
 - **Desktop:** wire Electron's native `dialog.showOpenDialog` through a small `preload.js` bridge so users can browse to any location (e.g. a OneDrive- or Dropbox-synced folder).
@@ -242,7 +241,7 @@ The New Project modal pre-fills the folder path from `PROJECTS_DEFAULT_DIR` (`~/
 
 ## Roadmap
 
-Milestones 0–4 are complete. Remaining work, per [`docs/implementation-spec.md`](docs/implementation-spec.md) §18:
+Milestones 0–5 are complete. Remaining work, per [`docs/implementation-spec.md`](docs/implementation-spec.md) §18:
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
@@ -251,7 +250,7 @@ Milestones 0–4 are complete. Remaining work, per [`docs/implementation-spec.md
 | 2 — Hardening | Cancel/retry, branded templates, timestamp overrides, structured errors | ✅ Complete |
 | 3 — Desktop shell | Electron app + macOS DMG, same-origin design, PyInstaller backend | ✅ Complete |
 | 4 — Second provider | OpenAI support (pulled forward into M1) | ✅ Complete |
-| **5 — Media + MAS 8** | `mas-8.md` knowledge + UI enablement; audio/video/image processors (Whisper, ffmpeg, vision) with `PENDING → TRANSCRIBING → EXTRACTED` | ⏳ Next |
+| **5 — Media + MAS 8** | `mas-8.md` knowledge + UI enablement; audio/video/image processors (Parakeet ASR with faster-whisper fallback, bundled ffmpeg, provider vision) with `PENDING → TRANSCRIBING → EXTRACTED` | ✅ Complete |
 | **6 — Branding clone** | Extract and apply a client's fonts/logo/table styling to the DOCX | ⏳ Planned |
 | **7 — Ollama** | Local-model provider in `LLMClient` + model-discovery Settings UI | ⏳ Planned |
 | **8 — Windows + polish** | Windows installer (electron-builder + PyInstaller), native file dialogs, onboarding, accessibility, optional code signing | ⏳ Planned |
