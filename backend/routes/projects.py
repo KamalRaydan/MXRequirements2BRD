@@ -1,5 +1,6 @@
 """Project CRUD + branded template upload (spec §10.2)."""
 import re
+import shutil
 from pathlib import Path
 
 import aiofiles
@@ -20,6 +21,22 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "project"
 
 
+# Subfolders this app creates and owns inside every project folder.
+APP_SUBFOLDERS = ("sources", "extracted", "output", "branding")
+
+
+def _default_folder(client_name: str, project_name: str) -> str:
+    """The folder we auto-create when the user doesn't choose their own."""
+    return str(config.PROJECTS_DEFAULT_DIR / f"{_slug(client_name)}-{_slug(project_name)}")
+
+
+def _is_auto_folder(project) -> bool:
+    """True when the project's folder is the one we generated for it (the user
+    left the folder blank). In that case the whole folder belongs to the app, so
+    it is safe to remove it on delete. A folder the user picked is left alone."""
+    return Path(project.folder_path) == Path(_default_folder(project.client_name, project.project_name))
+
+
 @router.post("/projects", status_code=201, response_model=ProjectOut)
 def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     if body.maximo_version not in config.VERSION_MAP:
@@ -28,9 +45,7 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     if not enabled:
         raise api_error(422, "VERSION_NOT_AVAILABLE", f"{label} support is coming soon")
 
-    folder = body.folder_path or str(
-        config.PROJECTS_DEFAULT_DIR / f"{_slug(body.client_name)}-{_slug(body.project_name)}"
-    )
+    folder = body.folder_path or _default_folder(body.client_name, body.project_name)
     if db.query(Project).filter(Project.folder_path == folder).first():
         raise api_error(409, "FOLDER_IN_USE", "Another project already uses this folder")
 
@@ -47,12 +62,16 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     )
     db.add(project)
     db.commit()
+    project.is_custom_folder = not _is_auto_folder(project)
     return project
 
 
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
-    return db.query(Project).order_by(Project.created_at.desc()).all()
+    projects = db.query(Project).order_by(Project.created_at.desc()).all()
+    for p in projects:
+        p.is_custom_folder = not _is_auto_folder(p)  # tells the UI whether delete removes the folder
+    return projects
 
 
 @router.get("/projects/{project_id}")
@@ -60,6 +79,7 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise api_error(404, "NOT_FOUND", "Project not found")
+    project.is_custom_folder = not _is_auto_folder(project)
     source_count = db.query(Source).filter(Source.project_id == project_id).count()
     latest_run = (
         db.query(PipelineRun)
@@ -79,7 +99,19 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise api_error(404, "NOT_FOUND", "Project not found")
-    # Remove DB rows only — never delete the user's folder (spec §10.2)
+
+    # Remove the files this app created for the project: the subfolders it makes
+    # and everything inside them. Files the user put elsewhere are untouched.
+    folder = Path(project.folder_path)
+    for sub in APP_SUBFOLDERS:
+        shutil.rmtree(folder / sub, ignore_errors=True)
+
+    # If we auto-generated this folder, the whole thing is ours, so remove it too
+    # — but only if nothing unexpected is left inside. A folder the user chose is
+    # always kept, even when empty.
+    if _is_auto_folder(project) and folder.exists() and not any(folder.iterdir()):
+        folder.rmdir()
+
     db.query(Source).filter(Source.project_id == project_id).delete()
     db.query(PipelineRun).filter(PipelineRun.project_id == project_id).delete()
     db.delete(project)

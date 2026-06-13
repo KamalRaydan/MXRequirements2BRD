@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import StatusBadge from '../components/StatusBadge'
+import SourceTextModal from '../components/SourceTextModal'
+import ConfirmDialog from '../components/ConfirmDialog'
 import { downloadUrl } from '../api'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
@@ -9,6 +11,13 @@ function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+// The "view text" action wording reflects how the text was produced
+function viewLabel(filetype) {
+  if (filetype === 'image') return 'View AI reading'
+  if (filetype === 'audio' || filetype === 'video') return 'View transcript'
+  return 'View text'
 }
 
 // ISO timestamp -> "YYYY-MM-DDTHH:mm" in local time, for <input type="datetime-local">
@@ -30,6 +39,9 @@ export default function ProjectDetail() {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState(null)
   const [editingSourceId, setEditingSourceId] = useState(null)
+  const [viewingSource, setViewingSource] = useState(null)
+  // Holds { title, message, confirmLabel, onConfirm } while a confirm dialog is open.
+  const [confirmState, setConfirmState] = useState(null)
   const [dateValue, setDateValue] = useState('')
   const [brandingError, setBrandingError] = useState(null)
   const [refreshingDates, setRefreshingDates] = useState(false)
@@ -192,7 +204,7 @@ export default function ProjectDetail() {
                       )}
                     </td>
                     <td className="px-4 py-2">
-                      <StatusBadge status={s.processing_status} title={s.error_message} />
+                      <StatusBadge status={s.processing_status} filetype={s.filetype} title={s.error_message} />
                     </td>
                     <td className="px-4 py-2 text-right">
                       {(s.processing_status === 'PENDING' || s.processing_status === 'ERROR') &&
@@ -204,6 +216,14 @@ export default function ProjectDetail() {
                             {s.processing_status === 'PENDING' ? 'Process' : 'Retry'}
                           </button>
                         )}
+                      {s.processing_status === 'EXTRACTED' && (
+                        <button
+                          onClick={() => setViewingSource(s)}
+                          className="mr-3 text-xs font-medium text-blue-600 hover:underline"
+                        >
+                          {viewLabel(s.filetype)}
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           setEditingSourceId(s.id)
@@ -214,7 +234,12 @@ export default function ProjectDetail() {
                         Edit date
                       </button>
                       <button
-                        onClick={() => deleteSource(id, s.id)}
+                        onClick={() => setConfirmState({
+                          title: 'Delete file',
+                          message: `Delete "${s.filename}" from this project? This cannot be undone.`,
+                          confirmLabel: 'Delete',
+                          onConfirm: () => deleteSource(id, s.id),
+                        })}
                         className="text-xs text-slate-400 hover:text-red-600"
                       >
                         Delete
@@ -264,7 +289,12 @@ export default function ProjectDetail() {
             </button>
             {branding.branded_docx_path && (
               <button
-                onClick={() => removeBranding(id)}
+                onClick={() => setConfirmState({
+                  title: 'Remove template',
+                  message: 'Remove the branded template from this project?',
+                  confirmLabel: 'Remove',
+                  onConfirm: () => removeBranding(id),
+                })}
                 className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50"
               >
                 Remove
@@ -352,6 +382,24 @@ export default function ProjectDetail() {
             </table>
           </div>
         </section>
+      )}
+
+      {viewingSource && (
+        <SourceTextModal
+          projectId={id}
+          source={viewingSource}
+          onClose={() => setViewingSource(null)}
+        />
+      )}
+
+      {confirmState && (
+        <ConfirmDialog
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          onConfirm={() => { confirmState.onConfirm(); setConfirmState(null) }}
+          onCancel={() => setConfirmState(null)}
+        />
       )}
     </div>
   )

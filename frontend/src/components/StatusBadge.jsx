@@ -16,13 +16,26 @@ const LABELS = {
   UPLOADED: 'Uploaded',
 }
 
-export default function StatusBadge({ status, title }) {
+// All media share the TRANSCRIBING status, but only audio/video are transcribed —
+// images are read by the AI vision model, so they get their own wording.
+function labelFor(status, filetype) {
+  if (status === 'TRANSCRIBING' && filetype === 'image') return 'Reading image…'
+  return LABELS[status] || status
+}
+
+function defaultTitle(status, filetype) {
+  if (status === 'PENDING') return 'Uploaded before media processing existed — press Process'
+  if (status === 'TRANSCRIBING' && filetype === 'image') return 'Sent to your AI provider to read the image'
+  return undefined
+}
+
+export default function StatusBadge({ status, filetype, title }) {
   return (
     <span
-      title={title || (status === 'PENDING' ? 'Uploaded before media processing existed — press Process' : undefined)}
+      title={title || defaultTitle(status, filetype)}
       className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STYLES[status] || STYLES.UPLOADED}`}
     >
-      {LABELS[status] || status}
+      {labelFor(status, filetype)}
     </span>
   )
 }

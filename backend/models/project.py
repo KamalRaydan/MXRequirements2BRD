@@ -21,6 +21,7 @@ class ProjectOut(BaseModel):
     folder_path: str
     branded_docx_path: str | None
     created_at: datetime
+    is_custom_folder: bool = False  # True if the user chose the folder; controls delete cleanup wording
 
     model_config = {"from_attributes": True}
 
@@ -38,6 +39,11 @@ class SourceOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SourceTextOut(BaseModel):
+    text: str
+    char_count: int
 
 
 class SourcePatch(BaseModel):

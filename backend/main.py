@@ -71,7 +71,23 @@ for prefix in ("", "/api"):
     app.include_router(settings.router, prefix=prefix, include_in_schema=prefix == "")
     app.include_router(pipeline.router, prefix=prefix, include_in_schema=prefix == "")
 
+class SpaStaticFiles(StaticFiles):
+    """Serve the built frontend, but tell the browser never to cache index.html.
+
+    The JS/CSS files have content-hashed names (e.g. index-B4m2zVEm.js), so they
+    are safe to cache forever. index.html is not hashed — if the browser caches
+    it, a freshly rebuilt app stays hidden behind the stale page. no-cache forces
+    the browser to re-check index.html on every load, which picks up new builds.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if getattr(response, "media_type", None) == "text/html":
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
 # Single-command / desktop mode: if the frontend has been built, serve it at /.
 # Path comes from config (bundled inside the PyInstaller binary when packaged).
 if config.FRONTEND_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(config.FRONTEND_DIST), html=True), name="frontend")
+    app.mount("/", SpaStaticFiles(directory=str(config.FRONTEND_DIST), html=True), name="frontend")

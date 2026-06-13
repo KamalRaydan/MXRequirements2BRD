@@ -60,6 +60,11 @@ export function processSource(projectId, sourceId) {
   return apiPost(`/projects/${projectId}/sources/${sourceId}/process`)
 }
 
+// The extracted/transcribed text a source contributes to the BRD
+export function getSourceText(projectId, sourceId) {
+  return apiGet(`/projects/${projectId}/sources/${sourceId}/text`)
+}
+
 // Branded reference DOCX whose headings replace the default BRD structure
 export function uploadBranding(projectId, file) {
   const form = new FormData()

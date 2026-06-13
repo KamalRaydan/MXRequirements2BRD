@@ -163,7 +163,7 @@ This builds the frontend, freezes the backend with PyInstaller, then packages ev
 ## Testing
 
 ```bash
-npm run test:backend   # pytest (55 tests) — processors, media extractors, ID assignment, DOCX render, pipeline, etc.
+npm run test:backend   # pytest (60 tests) — processors, media extractors, ID assignment, DOCX render, pipeline, etc.
 ```
 
 ---
@@ -216,7 +216,7 @@ Sensible defaults; override via environment variables (see `backend/config.py`).
 
 ## Potential enhancements
 
-Ideas that build on the current foundation. None are started yet.
+Ideas that build on the current foundation.
 
 ### 1. Run the desktop app on Windows
 The architecture is already cross-platform (the backend resolves `%APPDATA%`, and `keyring` uses Windows Credential Locker automatically), and an NSIS `.exe` target is configured in `electron/package.json`. To ship a Windows build:
@@ -232,10 +232,8 @@ The UI already uses Tailwind. Add a theme toggle (Tailwind's `dark:` variant + a
 ### 3. Friendlier "Test Connection" error messages
 Today a failed connection test surfaces the raw provider error. Map common failures to plain guidance in `services/llm_client.py` / the settings route — e.g. *"That API key was rejected — check it's the right provider and hasn't expired"* for a 401, *"You've hit your provider's rate limit, try again shortly"* for a 429, and *"Couldn't reach the provider — check your internet connection"* for a network error.
 
-### 4. Let the user choose where project files are saved
-The New Project modal pre-fills the folder path from `PROJECTS_DEFAULT_DIR` (`~/MaximoBRD`) as editable text. Improve this with a real folder picker:
-- **Browser:** the File System Access API directory picker (where supported).
-- **Desktop:** wire Electron's native `dialog.showOpenDialog` through a small `preload.js` bridge so users can browse to any location (e.g. a OneDrive- or Dropbox-synced folder).
+### 4. A folder picker in the browser
+The New Project modal lets the user type a folder path, and **in the desktop app** a **Browse…** button opens the native picker (Electron's `dialog.showOpenDialog` via a small `preload.js` bridge) so they can pick any location — e.g. a OneDrive- or Dropbox-synced folder. The plain browser still has only the editable text field; add the File System Access API directory picker there too (where supported).
 
 ---
 

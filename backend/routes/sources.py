@@ -10,7 +10,7 @@ import config
 import processors
 from db.database import SessionLocal, get_db
 from db.models import Project, Source
-from models.project import SourceOut, SourcePatch
+from models.project import SourceOut, SourcePatch, SourceTextOut
 from routes import api_error
 
 router = APIRouter()
@@ -181,6 +181,23 @@ def list_sources(project_id: str, db: Session = Depends(get_db)):
         .order_by(Source.created_at.asc())
         .all()
     )
+
+
+@router.get("/projects/{project_id}/sources/{source_id}/text", response_model=SourceTextOut)
+def get_source_text(project_id: str, source_id: str, db: Session = Depends(get_db)):
+    """The extracted/transcribed text this source contributes to the BRD.
+
+    For images this is the AI provider's vision description; for audio/video the
+    local transcript; for documents the extracted text. This is exactly what the
+    BRD pipeline reads, so the user can verify it before generating.
+    """
+    source = db.get(Source, source_id)
+    if not source or source.project_id != project_id:
+        raise api_error(404, "NOT_FOUND", "Source not found")
+    if source.processing_status != "EXTRACTED" or not source.extracted_text_path:
+        raise api_error(409, "NOT_EXTRACTED", "This source has no extracted text yet")
+    text = Path(source.extracted_text_path).read_text(encoding="utf-8")
+    return SourceTextOut(text=text, char_count=source.char_count or len(text))
 
 
 @router.delete("/projects/{project_id}/sources/{source_id}", status_code=204)

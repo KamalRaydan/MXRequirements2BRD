@@ -550,7 +550,7 @@ Never return Python stack traces to the client. Request-validation failures (Fas
 
 - `GET /projects` → `200` list.
 - `GET /projects/{id}` → `200` full project + source count + latest run.
-- `DELETE /projects/{id}` → `204` (removes DB rows only; never deletes the folder).
+- `DELETE /projects/{id}` → `204`. Removes the DB rows **and** the app-owned files on disk: the subfolders this app creates inside the project folder (`sources/`, `extracted/`, `output/`, `branding/`) and everything in them. If the folder was auto-generated (the user left `folder_path` blank) it is removed entirely, but only when nothing unexpected remains inside it; a folder the user chose is always kept, even when empty. Files the user placed elsewhere are never touched. The UI confirms this with an explicit warning before deleting.
 - `PUT /projects/{id}/branding` — multipart branded DOCX → `branding/reference.docx`, updates `branded_docx_path`, returns extracted heading preview (422 `INVALID_TEMPLATE` if not a .docx or it has no Heading 1–3).
 - `GET /projects/{id}/branding` → `{ branded_docx_path, headings }` — preview for the stored template (empty when none set).
 - `DELETE /projects/{id}/branding` → `204` — removes the reference file and reverts to the default structure.

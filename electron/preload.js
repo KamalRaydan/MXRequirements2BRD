@@ -5,9 +5,11 @@
 // surface (so the UI can tell it's running inside the desktop shell), with
 // contextIsolation on and nodeIntegration off (see main.js).
 
-const { contextBridge } = require('electron')
+const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('maximobrd', {
   isDesktop: true,
   platform: process.platform,
+  // Open the native folder picker; resolves to the chosen path or null.
+  pickFolder: () => ipcRenderer.invoke('pick-folder'),
 })

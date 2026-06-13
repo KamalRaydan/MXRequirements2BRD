@@ -9,7 +9,7 @@
 // On quit the backend child is asked to stop with SIGTERM, then SIGKILL after a grace
 // period. In development, BACKEND_DEV=1 reuses an externally running uvicorn instead.
 
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron')
 const { spawn } = require('child_process')
 const http = require('http')
 const net = require('net')
@@ -142,6 +142,18 @@ function stopBackend() {
     if (backendProcess === child) child.kill('SIGKILL')
   }, SHUTDOWN_GRACE_MS)
 }
+
+// Native folder picker for the "Project folder" field. Returns the chosen
+// absolute path, or null if the user cancelled. Exposed to the renderer via
+// preload.js (window.maximobrd.pickFolder).
+ipcMain.handle('pick-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose project folder',
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
+})
 
 app.whenReady().then(boot)
 

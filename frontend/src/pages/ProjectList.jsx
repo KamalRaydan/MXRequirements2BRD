@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useProjectStore } from '../store/projectStore'
 import { useSettingsStore } from '../store/settingsStore'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 const VERSIONS = [
   { key: 'maximo-76', label: 'Maximo 7.6.x' },
@@ -22,6 +23,15 @@ function NewProjectModal({ onClose }) {
   const [folderPath, setFolderPath] = useState('')
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+
+  // The native folder picker only works inside the desktop app (a plain browser
+  // can't hand the page a real filesystem path).
+  const isDesktop = typeof window !== 'undefined' && window.maximobrd?.isDesktop
+
+  async function browseFolder() {
+    const picked = await window.maximobrd.pickFolder()
+    if (picked) setFolderPath(picked)
+  }
 
   const valid = clientName.trim() && projectName.trim() && projectDate
 
@@ -72,12 +82,23 @@ function NewProjectModal({ onClose }) {
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Project folder</label>
-            <input
-              className={field}
-              placeholder="Leave blank for ~/MaximoBRD/client-project"
-              value={folderPath}
-              onChange={(e) => setFolderPath(e.target.value)}
-            />
+            <div className="flex gap-2">
+              <input
+                className={field}
+                placeholder="Leave blank for ~/MaximoBRD/client-project"
+                value={folderPath}
+                onChange={(e) => setFolderPath(e.target.value)}
+              />
+              {isDesktop && (
+                <button
+                  type="button"
+                  onClick={browseFolder}
+                  className="shrink-0 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Browse…
+                </button>
+              )}
+            </div>
           </div>
         </div>
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -102,6 +123,8 @@ export default function ProjectList() {
   const { projects, loadProjects, deleteProject } = useProjectStore()
   const { configured, loaded, load } = useSettingsStore()
   const [showModal, setShowModal] = useState(false)
+  // Holds the project pending removal while the confirm dialog is open.
+  const [pendingRemove, setPendingRemove] = useState(null)
 
   useEffect(() => {
     loadProjects()
@@ -158,7 +181,7 @@ export default function ProjectList() {
                   <td className="px-4 py-3 text-slate-500">{new Date(p.created_at).toLocaleDateString()}</td>
                   <td className="px-4 py-3 text-right">
                     <button
-                      onClick={() => { if (confirm(`Remove "${p.project_name}" from the list? Files stay on disk.`)) deleteProject(p.id) }}
+                      onClick={() => setPendingRemove(p)}
                       className="text-xs text-slate-400 hover:text-red-600"
                     >
                       Remove
@@ -172,6 +195,24 @@ export default function ProjectList() {
       )}
 
       {showModal && <NewProjectModal onClose={() => setShowModal(false)} />}
+
+      {pendingRemove && (
+        <ConfirmDialog
+          title="Delete project"
+          message={`Delete "${pendingRemove.project_name}"? This cannot be undone.`}
+          details={[
+            'All uploaded files and their extracted text',
+            'Any generated BRDs and the run history',
+            ...(pendingRemove.branded_docx_path ? ['The branded template'] : []),
+            pendingRemove.is_custom_folder
+              ? `Your folder is kept; only the app's files inside it are removed: ${pendingRemove.folder_path}`
+              : `The project folder is removed: ${pendingRemove.folder_path}`,
+          ]}
+          confirmLabel="Delete"
+          onConfirm={() => { deleteProject(pendingRemove.id); setPendingRemove(null) }}
+          onCancel={() => setPendingRemove(null)}
+        />
+      )}
     </div>
   )
 }
